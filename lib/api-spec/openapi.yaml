@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Campus Cart pilot APIs
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: campus-cart
+    description: Private participant pilot
+  - name: research
+    description: Researcher dashboard and export
 paths:
   /healthz:
     get:
@@ -24,6 +28,246 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /campus-cart/config:
+    get:
+      operationId: getCampusCartConfig
+      tags: [campus-cart]
+      summary: Get public pilot capabilities
+      responses:
+        "200":
+          description: Current pilot configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CampusCartConfig"
+  /campus-cart/pilot/access:
+    post:
+      operationId: verifyPilotInvite
+      tags: [campus-cart]
+      summary: Verify an invite code and issue a short-lived pilot-access cookie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PilotAccessInput"
+      responses:
+        "200":
+          description: Invite accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PilotAccess"
+        "400":
+          description: Invite code not accepted
+  /campus-cart/participants/me:
+    get:
+      operationId: getMyParticipant
+      tags: [campus-cart]
+      summary: Get the signed-in participant's profile and current request
+      responses:
+        "200":
+          description: Participant profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParticipantProfile"
+        "401":
+          description: Sign-in required
+    put:
+      operationId: saveMyParticipant
+      tags: [campus-cart]
+      summary: Save participant role after verified ND email sign-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParticipantProfileInput"
+      responses:
+        "200":
+          description: Participant profile saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParticipantProfile"
+        "401":
+          description: Sign-in required
+        "403":
+          description: Verified @nd.edu email and valid pilot access required
+  /campus-cart/requests:
+    post:
+      operationId: createShoppingRequest
+      tags: [campus-cart]
+      summary: Record a participant's requested purchase, without placing an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ShoppingRequestInput"
+      responses:
+        "201":
+          description: Request received; no order placed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingRequest"
+        "401":
+          description: Sign-in required
+        "403":
+          description: Verified participant access required
+  /campus-cart/participants/me/request:
+    get:
+      operationId: getMyShoppingRequest
+      tags: [campus-cart]
+      summary: Get the signed-in participant's latest request
+      responses:
+        "200":
+          description: Request record or null when none exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShoppingRequestResult"
+        "401":
+          description: Sign-in required
+  /campus-cart/events:
+    post:
+      operationId: recordFunnelEvent
+      tags: [campus-cart]
+      summary: Record a server-side funnel event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FunnelEventInput"
+      responses:
+        "201":
+          description: Event recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedStatus"
+        "401":
+          description: Sign-in required
+  /campus-cart/feedback:
+    post:
+      operationId: submitParticipantFeedback
+      tags: [campus-cart]
+      summary: Submit optional card-connection feedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ParticipantFeedbackInput"
+      responses:
+        "201":
+          description: Feedback recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreatedStatus"
+        "401":
+          description: Sign-in required
+  /campus-cart/cards/setup:
+    post:
+      operationId: startCardSetup
+      tags: [campus-cart]
+      summary: Start Stripe-hosted test-mode Checkout in setup mode
+      responses:
+        "200":
+          description: Checkout URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "401":
+          description: Sign-in required
+        "503":
+          description: Stripe test mode is not configured
+  /campus-cart/cards/verify:
+    post:
+      operationId: verifyCardSetup
+      tags: [campus-cart]
+      summary: Verify Checkout setup completion server-side
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckoutVerificationInput"
+      responses:
+        "200":
+          description: Verified card setup status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardSetupStatus"
+        "401":
+          description: Sign-in required
+        "503":
+          description: Stripe test mode is not configured
+  /campus-cart/cards/me:
+    get:
+      operationId: getMyCardStatus
+      tags: [campus-cart]
+      summary: Get the verified card-setup status
+      responses:
+        "200":
+          description: Card status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardSetupStatus"
+        "401":
+          description: Sign-in required
+    delete:
+      operationId: disconnectMyCard
+      tags: [campus-cart]
+      summary: Disconnect the saved payment method
+      responses:
+        "200":
+          description: Updated card status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardSetupStatus"
+        "401":
+          description: Sign-in required
+  /research/dashboard:
+    get:
+      operationId: getResearchDashboard
+      tags: [research]
+      summary: Get anonymized participant and requested-purchase research metrics
+      responses:
+        "200":
+          description: Research dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchDashboard"
+        "401":
+          description: Researcher sign-in required
+        "403":
+          description: Researcher access required
+  /research/export.csv:
+    get:
+      operationId: exportResearchCsv
+      tags: [research]
+      summary: Export anonymized research records as CSV
+      responses:
+        "200":
+          description: Anonymized CSV export
+          content:
+            text/csv:
+              schema:
+                type: string
+        "401":
+          description: Researcher sign-in required
+        "403":
+          description: Researcher access required
 components:
   schemas:
     HealthStatus:
@@ -33,4 +277,138 @@ components:
           type: string
       required:
         - status
+    CampusCartConfig:
+      type: object
+      properties:
+        audioEnabled: { type: boolean }
+        cardSetupEnabled: { type: boolean }
+        paymentMode: { type: string, enum: [test] }
+        purchasingEnabled: { type: boolean, const: false }
+        supportedMerchants:
+          type: array
+          items: { type: string }
+      required: [audioEnabled, cardSetupEnabled, paymentMode, purchasingEnabled, supportedMerchants]
+    PilotAccessInput:
+      type: object
+      properties:
+        inviteCode: { type: string, minLength: 1, maxLength: 128 }
+      required: [inviteCode]
+    PilotAccess:
+      type: object
+      properties:
+        accepted: { type: boolean, const: true }
+      required: [accepted]
+    ParticipantProfileInput:
+      type: object
+      properties:
+        role: { type: string, enum: [student, staff] }
+      required: [role]
+    ParticipantProfile:
+      type: object
+      properties:
+        participantId: { type: string, format: uuid }
+        role: { type: string, enum: [student, staff] }
+        hasRequest: { type: boolean }
+        cardStatus: { type: string, enum: [not_connected, setup_pending, connected] }
+      required: [participantId, role, hasRequest, cardStatus]
+    ShoppingRequestInput:
+      type: object
+      properties:
+        item: { type: string, minLength: 1, maxLength: 240 }
+        category: { type: string, minLength: 1, maxLength: 80 }
+        merchant: { type: ["string", "null"], maxLength: 160 }
+        budgetCents: { type: integer, minimum: 1, maximum: 100000000 }
+      required: [item, category, merchant, budgetCents]
+    ShoppingRequest:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        participantId: { type: string, format: uuid }
+        item: { type: string }
+        category: { type: string }
+        merchant: { type: ["string", "null"] }
+        budgetCents: { type: integer }
+        supportStatus: { type: string, enum: [supported, unsupported, unspecified] }
+        status: { type: string, enum: [received] }
+        createdAt: { type: string, format: date-time }
+      required: [id, participantId, item, category, merchant, budgetCents, supportStatus, status, createdAt]
+    ShoppingRequestResult:
+      type: object
+      properties:
+        request:
+          oneOf:
+            - $ref: "#/components/schemas/ShoppingRequest"
+            - type: "null"
+      required: [request]
+    FunnelEventInput:
+      type: object
+      properties:
+        eventType: { type: string, enum: [card_step_viewed, setup_started] }
+      required: [eventType]
+    ParticipantFeedbackInput:
+      type: object
+      properties:
+        feedback: { type: string, minLength: 1, maxLength: 1200 }
+      required: [feedback]
+    CreatedStatus:
+      type: object
+      properties:
+        created: { type: boolean, const: true }
+      required: [created]
+    CheckoutSession:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+      required: [url]
+    CheckoutVerificationInput:
+      type: object
+      properties:
+        sessionId: { type: string, minLength: 8, maxLength: 256 }
+      required: [sessionId]
+    CardSetupStatus:
+      type: object
+      properties:
+        status: { type: string, enum: [not_connected, setup_pending, connected] }
+        paymentMode: { type: string, enum: [test] }
+      required: [status, paymentMode]
+    ResearchCount:
+      type: object
+      properties:
+        label: { type: string }
+        uniqueParticipants: { type: integer }
+      required: [label, uniqueParticipants]
+    ResearchParticipant:
+      type: object
+      properties:
+        participantId: { type: string, format: uuid }
+        role: { type: string, enum: [student, staff] }
+        item: { type: ["string", "null"] }
+        category: { type: ["string", "null"] }
+        merchant: { type: ["string", "null"] }
+        budgetCents: { type: ["integer", "null"] }
+        cardStepViews: { type: integer }
+        setupStarts: { type: integer }
+        setupCompletions: { type: integer }
+        abandoned: { type: boolean }
+        feedback: { type: ["string", "null"] }
+      required: [participantId, role, item, category, merchant, budgetCents, cardStepViews, setupStarts, setupCompletions, abandoned, feedback]
+    ResearchDashboard:
+      type: object
+      properties:
+        paymentMode: { type: string, enum: [test] }
+        participants: { type: integer }
+        cardStepViews: { type: integer }
+        setupStarts: { type: integer }
+        verifiedSetupCompletions: { type: integer }
+        abandoned: { type: integer }
+        merchantRankings:
+          type: array
+          items: { $ref: "#/components/schemas/ResearchCount" }
+        categoryRankings:
+          type: array
+          items: { $ref: "#/components/schemas/ResearchCount" }
+        records:
+          type: array
+          items: { $ref: "#/components/schemas/ResearchParticipant" }
+      required: [paymentMode, participants, cardStepViews, setupStarts, verifiedSetupCompletions, abandoned, merchantRankings, categoryRankings, records]
 
