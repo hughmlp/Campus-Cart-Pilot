@@ -18,3 +18,9 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+CAMPUS_CART_INVITE_CODES = "IRISH-PILOT"
+CAMPUS_CART_SUPPORTED_MERCHANTS = "Amazon,Target,Walmart,CVS,Walgreens"

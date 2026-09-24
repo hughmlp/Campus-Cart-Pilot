@@ -1,15 +1,20 @@
-# [Project name]
+# Campus Cart
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Campus Cart is a private, independent Notre Dame student/staff research pilot that records shopping requests and test-mode card-setup interest without placing orders.
 
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/campus-cart run dev` — run the mobile-first web app
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- Runtime-managed: `DATABASE_URL`, Clerk keys
+- Shared config: `CAMPUS_CART_INVITE_CODES`, `CAMPUS_CART_SUPPORTED_MERCHANTS`
+- Optional shared config: `CAMPUS_CART_RESEARCHER_EMAILS` (comma-separated exact emails)
+- Optional secret: `STRIPE_SECRET_KEY` using a Stripe test key; without it card setup is truthfully disabled
+- Optional transcription configuration is not active in this build; voice remains visibly unavailable
 
 ## Stack
 
@@ -22,15 +27,26 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- API contract: `lib/api-spec/openapi.yaml`
+- Database schema: `lib/db/src/schema/campus-cart.ts`
+- API routes: `artifacts/api-server/src/routes/campus-cart.ts`
+- Web app: `artifacts/campus-cart/src`
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Real purchasing is disabled by design.
+- Card collection uses Stripe-hosted Checkout in `mode=setup`; the app never accepts card numbers or CVC.
+- Card connection is marked complete only after server-side Checkout-session verification.
+- Test and live data must never be mixed; this prototype exposes only test mode.
+- Research access is an exact email allowlist in `CAMPUS_CART_RESEARCHER_EMAILS`.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Invite-gated, verified `@nd.edu` participant onboarding
+- Editable shopping request with item, category, optional merchant, and maximum all-in budget
+- Truthful merchant support/result status with no simulated purchase behavior
+- Optional Stripe test-mode card setup and disconnect
+- Protected anonymized research dashboard, funnel metrics, rankings, feedback, and CSV export
 
 ## User preferences
 
@@ -38,7 +54,10 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Run OpenAPI codegen after every contract change.
+- Configure at least one exact researcher email before expecting `/research` access.
+- Stripe must be test mode (`sk_test_`); other keys are treated as unavailable.
+- Invite codes are non-secret pilot access controls, not authentication; Clerk owns identity and email verification.
 
 ## Pointers
 
