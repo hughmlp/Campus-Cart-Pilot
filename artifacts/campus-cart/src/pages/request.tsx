@@ -27,8 +27,8 @@ function RequestExperience() {
   const queryClient = useQueryClient();
   const config = useGetCampusCartConfig();
   const profile = useGetMyParticipant();
-  const saved = useGetMyShoppingRequest();
-  const card = useGetMyCardStatus();
+  const saved = useGetMyShoppingRequest({ query: { queryKey: getGetMyShoppingRequestQueryKey(), enabled: Boolean(profile.data?.participantId) } });
+  const card = useGetMyCardStatus({ query: { queryKey: getGetMyCardStatusQueryKey(), enabled: Boolean(profile.data?.participantId) } });
   const saveProfile = useSaveMyParticipant();
   const verifyInvite = useVerifyPilotInvite();
   const createRequest = useCreateShoppingRequest();
@@ -50,8 +50,11 @@ function RequestExperience() {
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [error, setError] = useState('');
   const [localRequest, setLocalRequest] = useState<ShoppingRequest | null>(null);
-  const [listening, setListening] = useState(false);
-  const recognition = useRef<{ stop: () => void; start: () => void } | null>(null);
+  const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing'>('idle');
+  const recorder = useRef<MediaRecorder | null>(null);
+  const stream = useRef<MediaStream | null>(null);
+  const upload = useRef<AbortController | null>(null);
+  const recordingSession = useRef(0);
   const cardEventSent = useRef(false);
   const verifiedSession = useRef('');
   const request = localRequest || saved.data?.request;
@@ -77,17 +80,90 @@ function RequestExperience() {
       onError: () => setError('We could not verify the card setup. Please check your status or try again.'),
     });
   }, []);
-  const toggleVoice = () => {
+  const stopTracks = () => { stream.current?.getTracks().forEach(track => track.stop()); stream.current = null; };
+  const cancelVoice = () => {
+    recordingSession.current++;
+    upload.current?.abort();
+    upload.current = null;
+    if (recorder.current) {
+      recorder.current.onstop = null;
+      if (recorder.current.state !== 'inactive') recorder.current.stop();
+      recorder.current = null;
+    }
+    stopTracks();
+    setVoiceState('idle');
+  };
+  useEffect(() => () => {
+    recordingSession.current++;
+    upload.current?.abort();
+    if (recorder.current) {
+      recorder.current.onstop = null;
+      if (recorder.current.state !== 'inactive') recorder.current.stop();
+    }
+    stream.current?.getTracks().forEach(track => track.stop());
+  }, []);
+  const toggleVoice = async () => {
     if (!config.data?.audioEnabled) return;
-    if (listening) { recognition.current?.stop(); setListening(false); return; }
-    const BrowserRecognition = (window as unknown as { SpeechRecognition?: new () => any; webkitSpeechRecognition?: new () => any }).SpeechRecognition || (window as unknown as { webkitSpeechRecognition?: new () => any }).webkitSpeechRecognition;
-    if (!BrowserRecognition) { setError('Voice input isn’t supported in this browser. You can type your request instead.'); return; }
-    const instance = new BrowserRecognition();
-    instance.lang = 'en-US'; instance.interimResults = false;
-    instance.onresult = (event: { results: { [key: number]: { [key: number]: { transcript: string } } } }) => setNarrative(previous => [previous, event.results[0][0].transcript].filter(Boolean).join(' '));
-    instance.onerror = () => { setListening(false); setError('Voice input stopped. You can keep typing your request.'); };
-    instance.onend = () => setListening(false);
-    recognition.current = instance; instance.start(); setListening(true); setError('');
+    if (voiceState === 'recording') { recorder.current?.stop(); setVoiceState('transcribing'); return; }
+    if (voiceState !== 'idle') return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('Recording isn’t supported in this browser. You can type your request instead.'); return;
+    }
+    setVoiceState('starting');
+    setError('');
+    const session = ++recordingSession.current;
+    try {
+      const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (session !== recordingSession.current) { media.getTracks().forEach(track => track.stop()); return; }
+      stream.current = media;
+      const mimeType = ['audio/webm', 'audio/mp4', 'audio/ogg'].find(type => MediaRecorder.isTypeSupported(type));
+      if (!mimeType) throw new Error('Unsupported recording format');
+      const instance = new MediaRecorder(media, { mimeType });
+      const chunks: Blob[] = [];
+      instance.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+      instance.onerror = () => {
+        instance.onstop = null;
+        stopTracks();
+        recorder.current = null;
+        setVoiceState('idle');
+        setError('Recording stopped unexpectedly. You can type your request instead.');
+      };
+      instance.onstop = async () => {
+        stopTracks();
+        recorder.current = null;
+        if (session !== recordingSession.current) return;
+        const audio = new Blob(chunks, { type: mimeType });
+        if (!audio.size || audio.size > 10 * 1024 * 1024) {
+          setError(audio.size ? 'Recording is too large. Please record a shorter request or type it.' : 'No audio was captured. Please try again or type your request.');
+          setVoiceState('idle');
+          return;
+        }
+        const controller = new AbortController();
+        upload.current = controller;
+        try {
+          const response = await fetch('/api/campus-cart/requests/transcription', {
+            method: 'POST', headers: { 'Content-Type': mimeType }, body: audio,
+            credentials: 'same-origin', signal: controller.signal,
+          });
+          if (!response.ok) throw new Error('Transcription failed');
+          const result: { text: string } = await response.json();
+          if (!controller.signal.aborted && session === recordingSession.current) setNarrative(previous => [previous.trim(), result.text.trim()].filter(Boolean).join(' ').slice(0, 240));
+        } catch {
+          if (!controller.signal.aborted && session === recordingSession.current) setError('We couldn’t transcribe that recording. Please try again or type your request.');
+        } finally {
+          if (!controller.signal.aborted && session === recordingSession.current) setVoiceState('idle');
+          if (upload.current === controller) upload.current = null;
+        }
+      };
+      recorder.current = instance;
+      instance.start();
+      setVoiceState('recording');
+    } catch {
+      if (session !== recordingSession.current) return;
+      stopTracks();
+      setVoiceState('idle');
+      setError('Microphone access or recording is unavailable. You can type your request instead.');
+    }
   };
   const nextFromRole = () => {
     if (!role) { setError('Choose student or staff to continue.'); return; }
@@ -98,6 +174,7 @@ function RequestExperience() {
     });
   };
   const toDetails = () => {
+    if (voiceState !== 'idle') { setError('Finish recording and transcription before continuing.'); return; }
     if (!narrative.trim()) { setError('Describe what you need to continue.'); return; }
     if (!item) setItem(narrative.trim().slice(0, 240));
     setError(''); setStep(2);
@@ -143,7 +220,8 @@ function RequestExperience() {
     feedbackMutation.mutate({ data: { feedback: feedback.trim() } }, { onSuccess: () => { setFeedbackSent(true); setFeedback(''); queryClient.invalidateQueries({ queryKey: getGetResearchDashboardQueryKey() }); }, onError: () => setError('Feedback was not sent. Please try again.') });
   };
   if (config.isLoading || profile.isLoading || saved.isLoading) return <LoadingPanel />;
-  if (config.isError || profile.isError || saved.isError) return <div className="space-y-5"><ErrorPanel title="We couldn’t open your pilot space." detail="Your invitation may have expired. Re-enter your code below, or try loading again." onRetry={() => { config.refetch(); profile.refetch(); saved.refetch(); }}/><form className="rounded-[24px] border border-border bg-card p-6" onSubmit={event => { event.preventDefault(); verifyInvite.mutate({ data: { inviteCode: inviteCode.trim() } }, { onSuccess: () => { setError(''); profile.refetch(); saved.refetch(); }, onError: () => setError('That invitation code could not be verified.') }); }}><label htmlFor="invite-retry" className="label">Renew pilot access</label><div className="flex flex-col gap-3 sm:flex-row"><input id="invite-retry" data-testid="input-renew-invite" className="field" value={inviteCode} onChange={event => setInviteCode(event.target.value)} placeholder="Invitation code" maxLength={128}/><button data-testid="button-renew-invite" className="btn-primary shrink-0" disabled={!inviteCode.trim() || verifyInvite.isPending}>{verifyInvite.isPending ? 'Checking…' : 'Verify code'}</button></div>{error && <p role="alert" data-testid="status-renew-invite-error" className="mt-3 text-sm text-destructive">{error}</p>}</form></div>;
+  const newParticipant = profile.isError && profile.error?.status === 401;
+  if (config.isError || (profile.isError && !newParticipant) || saved.isError) return <div className="space-y-5"><ErrorPanel title="We couldn’t open your pilot space." detail="Your invitation may have expired. Re-enter your code below, or try loading again." onRetry={() => { config.refetch(); profile.refetch(); if (profile.data) saved.refetch(); }}/><form className="rounded-[24px] border border-border bg-card p-6" onSubmit={event => { event.preventDefault(); verifyInvite.mutate({ data: { inviteCode: inviteCode.trim() } }, { onSuccess: () => { setError(''); profile.refetch(); }, onError: () => setError('That invitation code could not be verified.') }); }}><label htmlFor="invite-retry" className="label">Renew pilot access</label><div className="flex flex-col gap-3 sm:flex-row"><input id="invite-retry" data-testid="input-renew-invite" className="field" value={inviteCode} onChange={event => setInviteCode(event.target.value)} placeholder="Invitation code" maxLength={128}/><button data-testid="button-renew-invite" className="btn-primary shrink-0" disabled={!inviteCode.trim() || verifyInvite.isPending}>{verifyInvite.isPending ? 'Checking…' : 'Verify code'}</button></div>{error && <p role="alert" data-testid="status-renew-invite-error" className="mt-3 text-sm text-destructive">{error}</p>}</form></div>;
   const supported = merchant.trim() && config.data?.supportedMerchants.some(m => m.toLowerCase() === merchant.trim().toLowerCase());
   return <div className="page-enter grid gap-12 lg:grid-cols-[265px_minmax(0,1fr)] lg:gap-20">
     <aside className="lg:pt-3">
@@ -167,8 +245,8 @@ function RequestExperience() {
           <div className="rounded-[26px] border border-border bg-card p-6 sm:p-8"><h3 className="display text-2xl">One last thought?</h3><p className="mt-2 text-sm text-muted-foreground">Optional feedback about the experience or card-connection step helps us improve this pilot.</p>{feedbackSent ? <p data-testid="status-feedback-sent" className="mt-5 text-sm font-bold text-[#38644a]">Feedback received. Thank you for helping us learn.</p> : <form onSubmit={submitFeedback} className="mt-5"><textarea data-testid="input-feedback" className="field min-h-28 resize-y" maxLength={1200} placeholder="What felt clear? What could be better?" value={feedback} onChange={e => setFeedback(e.target.value)}/><button data-testid="button-submit-feedback" disabled={!feedback.trim() || feedbackMutation.isPending} className="btn-outline lift mt-3">{feedbackMutation.isPending ? 'Sending…' : 'Send feedback'} <ArrowRight size={15}/></button></form>}</div>
         </div> : <div className="rounded-[28px] border border-border bg-card p-6 shadow-[0_22px_55px_-45px_rgba(25,55,86,.42)] sm:p-10">
           <div className="mb-9 flex items-center justify-between border-b border-border pb-6"><span className="mono text-[10px] font-bold text-[#a0753e]">STEP 0{step + 1} / 04</span><span className="text-xs text-muted-foreground">{stages[step]}</span></div>
-          {step === 0 && <div className="page-enter"><SectionLabel>FIRST, A LITTLE ABOUT YOU</SectionLabel><h2 className="display text-4xl sm:text-5xl">How are you part of campus?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">We only ask this to understand whose needs the pilot represents.</p><div className="mt-8 grid gap-3 sm:grid-cols-2">{(['student', 'staff'] as const).map(option => <button key={option} data-testid={`button-role-${option}`} onClick={() => { setRole(option); setError(''); }} className={`lift flex items-center justify-between rounded-2xl border p-5 text-left font-semibold capitalize ${role === option ? 'border-primary bg-[#e8dbc2]/60 text-primary' : 'border-border bg-background'}`}>{option}<span className={`grid size-6 place-items-center rounded-full border ${role === option ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>{role === option && <Check size={14}/>}</span></button>)}</div><button data-testid="button-next-role" onClick={nextFromRole} disabled={saveProfile.isPending} className="btn-primary lift mt-9 w-full sm:w-auto">{saveProfile.isPending ? 'Saving…' : 'Continue'} <ArrowRight size={17}/></button></div>}
-          {step === 1 && <div className="page-enter"><SectionLabel>PUT IT IN YOUR OWN WORDS</SectionLabel><h2 className="display text-4xl sm:text-5xl">What are you looking for?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">A sentence is enough. You’ll shape the details on the next screen.</p><textarea data-testid="input-request-narrative" value={narrative} onChange={e => setNarrative(e.target.value)} className="field mt-7 min-h-[180px] resize-y !p-5 text-lg" placeholder="I’m looking for…" maxLength={240}/><div className="mt-4 flex items-center justify-between gap-4"><button data-testid="button-voice-input" type="button" disabled={!config.data?.audioEnabled} onClick={toggleVoice} className="btn-outline lift !min-h-11 !px-4 text-xs"><Mic size={16}/>{!config.data?.audioEnabled ? 'Voice unavailable' : listening ? 'Stop recording' : 'Speak instead'}</button><span className="text-right text-xs text-muted-foreground">{!config.data?.audioEnabled ? 'Audio is not enabled for this pilot.' : listening ? 'Listening…' : 'Or type above'}</span></div><div className="mt-9 flex items-center justify-between gap-3"><button data-testid="button-back-role" onClick={() => { setError(''); setStep(0); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-next-request" onClick={toDetails} className="btn-primary lift">Continue <ArrowRight size={17}/></button></div></div>}
+           {step === 0 && <div className="page-enter"><SectionLabel>FIRST, A LITTLE ABOUT YOU</SectionLabel><h2 className="display text-4xl sm:text-5xl">How are you part of campus?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">We only ask this to understand whose needs the pilot represents.</p><div className="mt-8 grid gap-3 sm:grid-cols-2">{(['student', 'staff'] as const).map(option => <button key={option} data-testid={`button-role-${option}`} onClick={() => { setRole(option); setError(''); }} className={`lift flex items-center justify-between rounded-2xl border p-5 text-left font-semibold capitalize ${role === option ? 'border-primary bg-[#e8dbc2]/60 text-primary' : 'border-border bg-background'}`}>{option}<span className={`grid size-6 place-items-center rounded-full border ${role === option ? 'border-primary bg-primary text-primary-foreground' : 'border-border'}`}>{role === option && <Check size={14}/>}</span></button>)}</div>{newParticipant && <form className="mt-7" onSubmit={event => { event.preventDefault(); if (!inviteCode.trim()) return; verifyInvite.mutate({ data: { inviteCode: inviteCode.trim() } }, { onSuccess: () => setError(''), onError: () => setError('That invitation code could not be verified.') }); }}><label htmlFor="invite-onboarding" className="label">Invitation code</label><div className="flex gap-2"><input id="invite-onboarding" className="field" value={inviteCode} onChange={event => setInviteCode(event.target.value)} maxLength={128} placeholder="Enter or renew your code"/><button type="submit" className="btn-outline shrink-0" disabled={!inviteCode.trim() || verifyInvite.isPending}>{verifyInvite.isPending ? 'Checking…' : 'Verify code'}</button></div><p className="mt-2 text-xs text-muted-foreground">Already entered a valid code? You can continue below.</p></form>}<button data-testid="button-next-role" onClick={nextFromRole} disabled={saveProfile.isPending} className="btn-primary lift mt-9 w-full sm:w-auto">{saveProfile.isPending ? 'Saving…' : 'Continue'} <ArrowRight size={17}/></button></div>}
+           {step === 1 && <div className="page-enter"><SectionLabel>PUT IT IN YOUR OWN WORDS</SectionLabel><h2 className="display text-4xl sm:text-5xl">What are you looking for?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">A sentence is enough. You’ll shape the details on the next screen.</p><textarea data-testid="input-request-narrative" value={narrative} onChange={e => setNarrative(e.target.value)} className="field mt-7 min-h-[180px] resize-y !p-5 text-lg" placeholder="I’m looking for…" maxLength={240}/><div className="mt-4 flex items-center justify-between gap-4"><button data-testid="button-voice-input" type="button" disabled={!config.data?.audioEnabled || voiceState === 'starting' || voiceState === 'transcribing'} onClick={toggleVoice} className="btn-outline lift !min-h-11 !px-4 text-xs"><Mic size={16}/>{!config.data?.audioEnabled ? 'Voice unavailable' : voiceState === 'recording' ? 'Stop recording' : voiceState === 'transcribing' ? 'Transcribing…' : voiceState === 'starting' ? 'Starting…' : 'Speak instead'}</button><span role="status" className="text-right text-xs text-muted-foreground">{!config.data?.audioEnabled ? 'Audio is not enabled for this pilot.' : voiceState === 'recording' ? 'Recording… stop when you’re done.' : voiceState === 'transcribing' ? 'Turning your recording into editable text…' : 'Or type above'}</span></div><div className="mt-9 flex items-center justify-between gap-3"><button data-testid="button-back-role" onClick={() => { cancelVoice(); setError(''); setStep(0); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-next-request" onClick={toDetails} disabled={voiceState !== 'idle'} className="btn-primary lift">Continue <ArrowRight size={17}/></button></div></div>}
           {step === 2 && <form onSubmit={toReview} className="page-enter"><SectionLabel>MAKE IT SPECIFIC</SectionLabel><h2 className="display text-4xl sm:text-5xl">The details matter.</h2><p className="mt-4 text-sm text-muted-foreground">Nothing is bought here. These fields make your request useful for research.</p><div className="mt-8 space-y-5"><div><label htmlFor="item" className="label">Item you need <span className="text-destructive">*</span></label><input id="item" data-testid="input-item" className="field" value={item} onChange={e => setItem(e.target.value)} maxLength={240} placeholder="Describe the item"/></div><div><label htmlFor="category" className="label">Category <span className="text-destructive">*</span></label><input id="category" data-testid="input-category" className="field" value={category} onChange={e => setCategory(e.target.value)} maxLength={80} placeholder="What kind of item is it?"/></div><div><label htmlFor="merchant" className="label">Preferred merchant <span className="font-normal text-muted-foreground">· optional</span></label><input id="merchant" data-testid="input-merchant" className="field" value={merchant} onChange={e => setMerchant(e.target.value)} maxLength={160} placeholder="Leave blank if you’re flexible"/>{merchant.trim() && !supported && <p data-testid="status-merchant-unsupported-preview" className="mt-2 text-xs text-[#8a662d]">We can’t purchase from this merchant yet. Your request has been recorded only after you submit it.</p>}</div><div><label htmlFor="budget" className="label">Maximum total budget <span className="text-destructive">*</span></label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">$</span><input id="budget" data-testid="input-budget" inputMode="decimal" className="field !pl-8" value={budget} onChange={e => setBudget(e.target.value)} placeholder="0.00"/></div><p className="mt-2 text-xs text-muted-foreground">The maximum total you would spend, including taxes and fees. This is not a price quote.</p></div></div><div className="mt-9 flex items-center justify-between gap-3"><button type="button" data-testid="button-back-request" onClick={() => { setError(''); setStep(1); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-review-request" className="btn-primary lift">Review request <ArrowRight size={17}/></button></div></form>}
           {step === 3 && <div className="page-enter"><SectionLabel>CHECK BEFORE YOU SEND</SectionLabel><h2 className="display text-4xl sm:text-5xl">Does this look right?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">You are submitting a research request, not placing an order.</p><div className="mt-8 divide-y divide-border rounded-2xl border border-border bg-background px-5">{[['Item', item], ['Category', category], ['Preferred merchant', merchant || 'No preference'], ['Maximum total including taxes and fees', money(Math.round(Number(budget) * 100))]].map(([label, value]) => <div key={label} className="flex justify-between gap-4 py-4 text-sm"><span className="text-muted-foreground">{label}</span><strong className="max-w-[55%] text-right font-semibold break-words">{value}</strong></div>)}</div><div className="mt-5 flex gap-3 rounded-xl bg-[#f4e8d0] p-4 text-xs leading-relaxed text-[#75582d]"><LockKeyhole size={18} className="shrink-0"/><span>TEST MODE. Submitting records your request for research. No purchase, order, or charge will occur.</span></div><div className="mt-9 flex items-center justify-between gap-3"><button data-testid="button-edit-request" onClick={() => { setError(''); setStep(2); }} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground"><PenLine size={16}/>Edit details</button><button data-testid="button-submit-request" disabled={createRequest.isPending} onClick={submitRequest} className="btn-primary lift">{createRequest.isPending ? 'Recording…' : 'Submit request'} <ChevronRight size={17}/></button></div></div>}
         </div>}

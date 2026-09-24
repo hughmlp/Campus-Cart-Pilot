@@ -25,6 +25,8 @@ export * from './participantProfileInputRole';
 export * from './participantProfileRole';
 export * from './pilotAccess';
 export * from './pilotAccessInput';
+export * from './requestAudio';
+export * from './requestTranscript';
 export * from './researchCount';
 export * from './researchDashboard';
 export * from './researchDashboardPaymentMode';

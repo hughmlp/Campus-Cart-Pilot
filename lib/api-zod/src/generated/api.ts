@@ -105,6 +105,15 @@ export const CreateShoppingRequestResponse = zod.object({
 
 
 /**
+ * Accepts up to 10 MB of recorded audio. Audio is processed temporarily and deleted after transcription; only the returned text can be edited and submitted as a request.
+ * @summary Transcribe a participant's short voice request without saving audio
+ */
+export const TranscribeShoppingRequestResponse = zod.object({
+  "text": zod.string()
+})
+
+
+/**
  * @summary Get the signed-in participant's latest request
  */
 export const GetMyShoppingRequestResponse = zod.object({

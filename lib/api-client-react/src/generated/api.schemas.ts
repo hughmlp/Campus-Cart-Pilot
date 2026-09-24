@@ -24,6 +24,12 @@ export interface CampusCartConfig {
   supportedMerchants: string[];
 }
 
+export type RequestAudio = Blob;
+
+export interface RequestTranscript {
+  text: string;
+}
+
 export interface PilotAccessInput {
   /**
      * @minLength 1

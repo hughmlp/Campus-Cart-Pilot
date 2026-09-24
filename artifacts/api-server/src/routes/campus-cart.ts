@@ -1,7 +1,12 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import express, { Router, type IRouter, type Request, type Response } from "express";
 import { clerkClient, getAuth } from "@clerk/express";
 import { and, desc, eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
+import OpenAI from "openai";
+import { createReadStream } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   db, participantsTable, shoppingRequestsTable, funnelEventsTable, participantFeedbackTable,
 } from "@workspace/db";
@@ -15,6 +20,15 @@ const supportedMerchants = () => (process.env.CAMPUS_CART_SUPPORTED_MERCHANTS ??
   .split(",").map((value) => value.trim()).filter(Boolean);
 const stripeKey = () => process.env.STRIPE_SECRET_KEY;
 const stripe = () => new Stripe(stripeKey()!);
+const transcriptionSettings = () => {
+  if (process.env.AI_INTEGRATIONS_OPENAI_BASE_URL && process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+    return { apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY, baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL };
+  }
+  return process.env.OPENAI_API_KEY ? { apiKey: process.env.OPENAI_API_KEY } : null;
+};
+const audioTypes: Record<string, string> = {
+  "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav",
+};
 
 async function identity(req: Request) {
   const { userId } = getAuth(req);
@@ -32,12 +46,12 @@ async function participant(req: Request) {
 }
 
 function hasPilotCookie(req: Request) {
-  return req.headers.cookie?.split(";").some((part) => part.trim() === "campus_cart_access=accepted") ?? false;
+  return Boolean(process.env.SESSION_SECRET) && req.signedCookies?.campus_cart_access === "accepted";
 }
 
 router.get("/campus-cart/config", (_req, res) => {
   res.json({
-    audioEnabled: false,
+    audioEnabled: Boolean(transcriptionSettings()),
     cardSetupEnabled: Boolean(stripeKey()?.startsWith("sk_test_")),
     paymentMode: "test",
     purchasingEnabled: false,
@@ -45,13 +59,48 @@ router.get("/campus-cart/config", (_req, res) => {
   });
 });
 
+router.post("/campus-cart/requests/transcription", async (req, res, next): Promise<void> => {
+  if (!await participant(req)) { res.status(401).json({ error: "Participant profile required" }); return; }
+  if (!transcriptionSettings()) { res.status(503).json({ error: "Transcription unavailable" }); return; }
+  const mediaType = req.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (!audioTypes[mediaType]) { res.status(415).json({ error: "Unsupported audio format" }); return; }
+  next();
+}, express.raw({ type: () => true, limit: "10mb" }), async (req, res): Promise<void> => {
+  const mediaType = req.headers["content-type"]!.split(";")[0].trim().toLowerCase();
+  if (!Buffer.isBuffer(req.body) || !req.body.length) {
+    res.status(400).json({ error: "Recording is empty" }); return;
+  }
+  let directory: string | undefined;
+  try {
+    directory = await mkdtemp(join(tmpdir(), "campus-cart-audio-"));
+    const path = join(directory, `request.${audioTypes[mediaType]}`);
+    await writeFile(path, req.body, { mode: 0o600 });
+    req.body = undefined;
+    const client = new OpenAI(transcriptionSettings()!);
+    const result = await client.audio.transcriptions.create({
+      model: "gpt-4o-mini-transcribe",
+      file: createReadStream(path),
+    });
+    const text = result.text.trim();
+    if (!text) { res.status(422).json({ error: "No speech detected; type your request instead" }); return; }
+    res.json({ text });
+  } catch (error) {
+    req.log.error({ err: error }, "Request transcription failed");
+    res.status(502).json({ error: "Could not transcribe recording; type your request instead" });
+  } finally {
+    req.body = undefined;
+    if (directory) await rm(directory, { recursive: true, force: true });
+  }
+});
+
 router.post("/campus-cart/pilot/access", (req, res) => {
   const parsed = VerifyPilotInviteBody.safeParse(req.body);
   const codes = (process.env.CAMPUS_CART_INVITE_CODES ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+  if (!process.env.SESSION_SECRET) { res.status(503).json({ error: "Pilot access unavailable" }); return; }
   if (!parsed.success || !codes.includes(parsed.data.inviteCode)) {
     res.status(400).json({ error: "Invite code not accepted" }); return;
   }
-  res.cookie("campus_cart_access", "accepted", { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 6 * 60 * 60 * 1000 });
+  res.cookie("campus_cart_access", "accepted", { signed: true, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 6 * 60 * 60 * 1000 });
   res.json({ accepted: true });
 });
 

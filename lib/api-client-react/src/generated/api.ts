@@ -32,6 +32,7 @@ import type {
   ParticipantProfileInput,
   PilotAccess,
   PilotAccessInput,
+  RequestTranscript,
   ResearchDashboard,
   ShoppingRequest,
   ShoppingRequestInput,
@@ -559,6 +560,95 @@ export const useCreateShoppingRequest = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getCreateShoppingRequestMutationOptions(options));
+    }
+
+export const getTranscribeShoppingRequestUrl = () => {
+
+
+
+
+  return `/api/campus-cart/requests/transcription`
+}
+
+/**
+ * Accepts up to 10 MB of recorded audio. Audio is processed temporarily and deleted after transcription; only the returned text can be edited and submitted as a request.
+ * @summary Transcribe a participant's short voice request without saving audio
+ */
+export const transcribeShoppingRequest = async (transcribeShoppingRequestBody: Blob, options?: Parameters<typeof customFetch>[1]): Promise<RequestTranscript> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<RequestTranscript>(getTranscribeShoppingRequestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'audio/webm', ...getHeaders(options?.headers) },
+    body: transcribeShoppingRequestBody
+  }
+);}
+
+
+
+
+
+export const getTranscribeShoppingRequestMutationKey = () => ['transcribeShoppingRequest'] as const;
+
+export const getTranscribeShoppingRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeShoppingRequest>>, TError,TranscribeShoppingRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof transcribeShoppingRequest>>, TError,TranscribeShoppingRequestMutationVariables, TContext> => {
+
+const mutationKey = getTranscribeShoppingRequestMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof transcribeShoppingRequest>>, TranscribeShoppingRequestMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  transcribeShoppingRequest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type TranscribeShoppingRequestMutationResult = NonNullable<Awaited<ReturnType<typeof transcribeShoppingRequest>>>
+    export type TranscribeShoppingRequestMutationBody = BodyType<Blob>
+    export type TranscribeShoppingRequestMutationError = ErrorType<void>
+    export type TranscribeShoppingRequestMutationVariables = {data: BodyType<Blob>}
+
+    /**
+ * @summary Transcribe a participant's short voice request without saving audio
+ */
+export const useTranscribeShoppingRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof transcribeShoppingRequest>>, TError,TranscribeShoppingRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof transcribeShoppingRequest>>,
+        TError,
+        TranscribeShoppingRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getTranscribeShoppingRequestMutationOptions(options));
     }
 
 export const getGetMyShoppingRequestUrl = () => {

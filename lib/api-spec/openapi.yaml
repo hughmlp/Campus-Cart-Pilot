@@ -117,6 +117,44 @@ paths:
           description: Sign-in required
         "403":
           description: Verified participant access required
+  /campus-cart/requests/transcription:
+    post:
+      operationId: transcribeShoppingRequest
+      tags: [campus-cart]
+      summary: Transcribe a participant's short voice request without saving audio
+      description: Accepts up to 10 MB of recorded audio. Audio is processed temporarily and deleted after transcription; only the returned text can be edited and submitted as a request.
+      requestBody:
+        required: true
+        content:
+          audio/webm:
+            schema:
+              $ref: "#/components/schemas/RequestAudio"
+          audio/mp4:
+            schema:
+              $ref: "#/components/schemas/RequestAudio"
+          audio/ogg:
+            schema:
+              $ref: "#/components/schemas/RequestAudio"
+          audio/wav:
+            schema:
+              $ref: "#/components/schemas/RequestAudio"
+      responses:
+        "200":
+          description: Editable transcription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestTranscript"
+        "400":
+          description: Empty or invalid recording
+        "401":
+          description: Participant profile required
+        "413":
+          description: Audio exceeds the 10 MB limit
+        "415":
+          description: Unsupported audio format
+        "503":
+          description: Transcription unavailable
   /campus-cart/participants/me/request:
     get:
       operationId: getMyShoppingRequest
@@ -288,6 +326,14 @@ components:
           type: array
           items: { type: string }
       required: [audioEnabled, cardSetupEnabled, paymentMode, purchasingEnabled, supportedMerchants]
+    RequestAudio:
+      type: string
+      format: binary
+    RequestTranscript:
+      type: object
+      properties:
+        text: { type: string }
+      required: [text]
     PilotAccessInput:
       type: object
       properties:
