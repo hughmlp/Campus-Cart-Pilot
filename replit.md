@@ -14,7 +14,7 @@ Campus Cart is a private, independent Notre Dame student/staff research pilot th
 - Shared config: `CAMPUS_CART_INVITE_CODES`, `CAMPUS_CART_SUPPORTED_MERCHANTS`
 - Optional shared config: `CAMPUS_CART_RESEARCHER_EMAILS` (comma-separated exact emails)
 - Optional secret: `STRIPE_SECRET_KEY` using a Stripe test key; without it card setup is truthfully disabled
-- Optional transcription configuration is not active in this build; voice remains visibly unavailable
+- Voice transcription uses Replit AI Integrations for OpenAI; recordings are temporary and deleted after each transcription attempt
 
 ## Stack
 

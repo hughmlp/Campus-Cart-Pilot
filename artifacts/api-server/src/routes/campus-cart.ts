@@ -24,7 +24,7 @@ const transcriptionSettings = () => {
   if (process.env.AI_INTEGRATIONS_OPENAI_BASE_URL && process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
     return { apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY, baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL };
   }
-  return process.env.OPENAI_API_KEY ? { apiKey: process.env.OPENAI_API_KEY } : null;
+  return null;
 };
 const audioTypes: Record<string, string> = {
   "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav",
