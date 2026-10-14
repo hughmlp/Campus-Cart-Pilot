@@ -165,19 +165,11 @@ function RequestExperience() {
       setError('Microphone access or recording is unavailable. You can type your request instead.');
     }
   };
-  const nextFromRole = async () => {
+  const nextFromRole = () => {
     if (saveProfile.isPending || verifyInvite.isPending) return;
     if (!role) { setError('Choose student or staff to continue.'); return; }
     setError('');
-    if (inviteCode.trim()) {
-      try {
-        await verifyInvite.mutateAsync({ data: { inviteCode: inviteCode.trim() } });
-      } catch {
-        setError('That invitation code was not accepted. Check your pilot invitation and try again.');
-        return;
-      }
-    }
-    saveProfile.mutate({ data: { role } }, {
+    saveProfile.mutate({ data: { role, ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}) } }, {
       onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetMyParticipantQueryKey() }); setStep(1); },
       onError: failure => {
         const data: unknown = failure.data;

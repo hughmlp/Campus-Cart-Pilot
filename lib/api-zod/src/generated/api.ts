@@ -59,8 +59,13 @@ export const GetMyParticipantResponse = zod.object({
 /**
  * @summary Save participant role after verified ND email sign-in
  */
+export const saveMyParticipantBodyInviteCodeMax = 128;
+
+
+
 export const SaveMyParticipantBody = zod.object({
-  "role": zod.enum(['student', 'staff'])
+  "role": zod.enum(['student', 'staff']),
+  "inviteCode": zod.string().min(1).max(saveMyParticipantBodyInviteCodeMax).optional().describe('Optional invitation code validated with the role save when the browser cannot retain the pilot-access cookie.')
 })
 
 export const SaveMyParticipantResponse = zod.object({

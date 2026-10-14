@@ -1,0 +1,1 @@
+- [Embedded pilot access](embedded-pilot-access.md) — do not rely solely on the invitation cookie for role saving in the embedded preview.

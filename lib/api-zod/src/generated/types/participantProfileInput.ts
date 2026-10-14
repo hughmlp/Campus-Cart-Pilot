@@ -9,4 +9,10 @@ import type { ParticipantProfileInputRole } from './participantProfileInputRole'
 
 export interface ParticipantProfileInput {
   role: ParticipantProfileInputRole;
+  /**
+     * Optional invitation code validated with the role save when the browser cannot retain the pilot-access cookie.
+     * @minLength 1
+     * @maxLength 128
+     */
+  inviteCode?: string;
 }

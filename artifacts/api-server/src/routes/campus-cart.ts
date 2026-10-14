@@ -52,6 +52,11 @@ function hasPilotCookie(req: Request) {
   return Boolean(process.env.SESSION_SECRET) && req.signedCookies?.campus_cart_access === "accepted";
 }
 
+function isPilotCodeAccepted(code: string) {
+  const codes = (process.env.CAMPUS_CART_INVITE_CODES ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  return codes.includes(code);
+}
+
 router.get("/campus-cart/config", (_req, res) => {
   res.json({
     audioEnabled: Boolean(transcriptionSettings()),
@@ -98,9 +103,8 @@ router.post("/campus-cart/requests/transcription", async (req, res, next): Promi
 
 router.post("/campus-cart/pilot/access", (req, res) => {
   const parsed = VerifyPilotInviteBody.safeParse(req.body);
-  const codes = (process.env.CAMPUS_CART_INVITE_CODES ?? "").split(",").map((v) => v.trim()).filter(Boolean);
   if (!process.env.SESSION_SECRET) { res.status(503).json({ error: "Pilot access unavailable" }); return; }
-  if (!parsed.success || !codes.includes(parsed.data.inviteCode)) {
+  if (!parsed.success || !isPilotCodeAccepted(parsed.data.inviteCode)) {
     res.status(400).json({ error: "Invite code not accepted" }); return;
   }
   res.cookie("campus_cart_access", "accepted", { signed: true, httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 6 * 60 * 60 * 1000 });
@@ -126,7 +130,11 @@ router.put("/campus-cart/participants/me", async (req, res): Promise<void> => {
   if (!auth) {
     res.status(403).json({ error: "Verify an @nd.edu email in your account before continuing." }); return;
   }
-  if (!hasPilotCookie(req)) {
+  const inviteCode = parsed.data.inviteCode?.trim();
+  if (inviteCode && !isPilotCodeAccepted(inviteCode)) {
+    res.status(400).json({ error: "That invitation code was not accepted. Check your pilot invitation and try again." }); return;
+  }
+  if (!hasPilotCookie(req) && !(inviteCode && process.env.SESSION_SECRET)) {
     res.status(403).json({ error: "Your pilot invitation is missing or expired. Enter your invitation code above, then select Continue." }); return;
   }
   const [record] = await db.insert(participantsTable).values({ clerkUserId: auth.userId, email: auth.email, role: parsed.data.role })

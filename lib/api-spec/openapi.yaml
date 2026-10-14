@@ -91,6 +91,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ParticipantProfile"
+        "400":
+          description: Invalid role or invitation code
         "401":
           description: Sign-in required
         "403":
@@ -348,6 +350,11 @@ components:
       type: object
       properties:
         role: { type: string, enum: [student, staff] }
+        inviteCode:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: Optional invitation code validated with the role save when the browser cannot retain the pilot-access cookie.
       required: [role]
     ParticipantProfile:
       type: object
