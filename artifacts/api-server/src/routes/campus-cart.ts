@@ -30,11 +30,14 @@ const audioTypes: Record<string, string> = {
   "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav",
 };
 
-async function identity(req: Request) {
+async function identity(req: Request, preferCampusEmail = false) {
   const { userId } = getAuth(req);
   if (!userId) return null;
   const user = await clerkClient.users.getUser(userId);
-  const email = user.emailAddresses.find((entry) => entry.verification?.status === "verified")?.emailAddress;
+  const verifiedEmails = user.emailAddresses.filter((entry) => entry.verification?.status === "verified");
+  const email = (preferCampusEmail
+    ? verifiedEmails.find((entry) => entry.emailAddress.toLowerCase().endsWith("@nd.edu"))
+    : verifiedEmails[0])?.emailAddress;
   return email ? { userId, email: email.toLowerCase() } : null;
 }
 
@@ -113,11 +116,18 @@ router.get("/campus-cart/participants/me", async (req, res): Promise<void> => {
 });
 
 router.put("/campus-cart/participants/me", async (req, res): Promise<void> => {
-  const auth = await identity(req);
+  const { userId } = getAuth(req);
+  if (!userId) { res.status(401).json({ error: "Sign-in required" }); return; }
+  const auth = await identity(req, true);
   const parsed = SaveMyParticipantBody.safeParse(req.body);
-  if (!auth) { res.status(401).json({ error: "Sign-in required" }); return; }
-  if (!auth.email.endsWith("@nd.edu") || !hasPilotCookie(req) || !parsed.success) {
-    res.status(403).json({ error: "Verified @nd.edu email and valid invite access required" }); return;
+  if (!parsed.success) {
+    res.status(400).json({ error: "Choose Student or Staff to continue." }); return;
+  }
+  if (!auth) {
+    res.status(403).json({ error: "Verify an @nd.edu email in your account before continuing." }); return;
+  }
+  if (!hasPilotCookie(req)) {
+    res.status(403).json({ error: "Your pilot invitation is missing or expired. Enter your invitation code above, then select Continue." }); return;
   }
   const [record] = await db.insert(participantsTable).values({ clerkUserId: auth.userId, email: auth.email, role: parsed.data.role })
     .onConflictDoUpdate({ target: participantsTable.clerkUserId, set: { role: parsed.data.role, email: auth.email } }).returning();

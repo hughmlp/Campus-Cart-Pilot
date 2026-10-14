@@ -165,12 +165,26 @@ function RequestExperience() {
       setError('Microphone access or recording is unavailable. You can type your request instead.');
     }
   };
-  const nextFromRole = () => {
+  const nextFromRole = async () => {
+    if (saveProfile.isPending || verifyInvite.isPending) return;
     if (!role) { setError('Choose student or staff to continue.'); return; }
     setError('');
+    if (inviteCode.trim()) {
+      try {
+        await verifyInvite.mutateAsync({ data: { inviteCode: inviteCode.trim() } });
+      } catch {
+        setError('That invitation code was not accepted. Check your pilot invitation and try again.');
+        return;
+      }
+    }
     saveProfile.mutate({ data: { role } }, {
       onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetMyParticipantQueryKey() }); setStep(1); },
-      onError: () => setError('We could not save your role. Please try again.'),
+      onError: failure => {
+        const data: unknown = failure.data;
+        setError(data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+          ? data.error
+          : 'We could not save your role. Please try again.');
+      },
     });
   };
   const toDetails = () => {
