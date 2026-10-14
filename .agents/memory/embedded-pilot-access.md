@@ -6,4 +6,4 @@ Role saving must work with a server-validated invitation supplied in the same au
 
 **Why:** In the user's embedded preview, invitation verification succeeded but the immediately following role save lacked the accepted cookie. A standalone test browser retained it and initially missed this failure.
 
-**How to apply:** Test onboarding with the pilot-access cookie absent or deliberately stripped. Preserve sign-in, verified campus-email, and server-side invitation validation; never bypass access checks to fix cookie transport.
+**How to apply:** Test onboarding with the pilot-access cookie absent or deliberately stripped, for both new and returning participants. A new-account-only test missed returning participants being asked for a code without being shown a recovery field. Preserve sign-in, verified campus-email, and server-side invitation validation; never bypass access checks to fix cookie transport.
