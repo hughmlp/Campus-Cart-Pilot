@@ -197,7 +197,7 @@ router.post("/campus-cart/cards/setup", async (req, res): Promise<void> => {
   }
   const origin = `${req.protocol}://${req.get("host")}`;
   const session = await stripe().checkout.sessions.create({
-    mode: "setup", customer: customerId,
+    mode: "setup", currency: "usd", customer: customerId,
     success_url: `${origin}/request?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/request?setup=cancelled`,
   });
