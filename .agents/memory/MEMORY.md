@@ -1,1 +1,2 @@
 - [Embedded pilot access](embedded-pilot-access.md) — do not rely solely on the invitation cookie for role saving in the embedded preview.
+- [Repeat request expectations](repeat-request-expectations.md) — starting another request means the first wizard step, not reopening the saved confirmation.

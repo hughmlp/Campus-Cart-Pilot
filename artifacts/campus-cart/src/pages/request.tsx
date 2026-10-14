@@ -51,6 +51,7 @@ function RequestExperience() {
   const [feedbackSent, setFeedbackSent] = useState(false);
   const [error, setError] = useState('');
   const [localRequest, setLocalRequest] = useState<ShoppingRequest | null>(null);
+  const [isNewRequest, setIsNewRequest] = useState(() => new URLSearchParams(window.location.search).get('new') === '1');
   const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing'>('idle');
   const recorder = useRef<MediaRecorder | null>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -58,7 +59,15 @@ function RequestExperience() {
   const recordingSession = useRef(0);
   const cardEventSent = useRef(false);
   const verifiedSession = useRef('');
-  const request = localRequest || saved.data?.request;
+  const request = localRequest || (isNewRequest ? null : saved.data?.request);
+
+  const setNewRequestMode = (enabled: boolean) => {
+    setIsNewRequest(enabled);
+    const url = new URL(window.location.href);
+    if (enabled) url.searchParams.set('new', '1');
+    else url.searchParams.delete('new');
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  };
 
   useEffect(() => { if (profile.data?.role && !role) setRole(profile.data.role); }, [profile.data?.role, role]);
   useEffect(() => {
@@ -170,6 +179,10 @@ function RequestExperience() {
     if (saveProfile.isPending || verifyInvite.isPending) return;
     if (!role) { setError('Choose student or staff to continue.'); return; }
     setError('');
+    if (isNewRequest && profile.data?.role === role) {
+      setStep(1);
+      return;
+    }
     saveProfile.mutate({ data: { role, ...(inviteCode.trim() ? { inviteCode: inviteCode.trim() } : {}) } }, {
       onSuccess: () => { queryClient.invalidateQueries({ queryKey: getGetMyParticipantQueryKey() }); setStep(1); },
       onError: failure => {
@@ -200,12 +213,31 @@ function RequestExperience() {
     createRequest.mutate({ data: { item: item.trim(), category: category.trim(), merchant: merchant.trim() || null, budgetCents: Math.round(Number(budget) * 100) } }, {
       onSuccess: data => {
         setLocalRequest(data);
+        setNewRequestMode(false);
         queryClient.invalidateQueries({ queryKey: getGetMyShoppingRequestQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetMyParticipantQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetResearchDashboardQueryKey() });
       },
       onError: () => setError('Your request was not recorded. Please try again. No order was placed.'),
     });
+  };
+  const startNewRequest = () => {
+    cancelVoice();
+    setLocalRequest(null);
+    setNewRequestMode(true);
+    setStep(0);
+    setRole(profile.data?.role ?? '');
+    setNarrative('');
+    setItem('');
+    setCategory('');
+    setMerchant('');
+    setBudget('');
+    setConsent(false);
+    setFeedback('');
+    setFeedbackSent(false);
+    setError('');
+    cardEventSent.current = false;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
   const beginCard = () => {
     if (!consent || !config.data?.cardSetupEnabled) return;
@@ -243,6 +275,12 @@ function RequestExperience() {
       <VerifiedEmailGate>
         {error && <div role="alert" data-testid="status-request-error" className="mb-5 flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive"><X size={17} className="shrink-0"/>{error}</div>}
         {request ? <div className="space-y-7">
+          <div>
+            <button type="button" data-testid="button-new-request" onClick={startNewRequest} className="btn-primary lift">
+              <ArrowLeft size={17}/> Start a new request
+            </button>
+            <p className="mt-3 text-xs text-muted-foreground">Return to the first step. Your previous request stays recorded.</p>
+          </div>
           <div className="rounded-[26px] border border-[#c9d4c9] bg-[#e9efe6] p-6 sm:p-9"><span className="mb-6 grid size-12 place-items-center rounded-full bg-[#d3e2d3] text-[#38644a]"><CheckCircle2 size={24}/></span><SectionLabel>SUBMISSION CONFIRMED</SectionLabel><h2 data-testid="status-request-received" className="display text-4xl sm:text-5xl">Request received—no order placed.</h2><p className="mt-4 max-w-xl text-sm leading-relaxed text-[#536b5a]">Thank you. We recorded your request for this research pilot. This is not an order confirmation and no payment has been taken.</p></div>
           {request.supportStatus === 'unsupported' && <div data-testid="status-unsupported-merchant" className="rounded-2xl border border-[#dbbc7d] bg-[#f7ecd2] p-5 text-sm font-semibold text-[#745823]">We can’t purchase from this merchant yet. Your request has been recorded.</div>}
           <div className="rounded-[26px] border border-border bg-card p-6 sm:p-8"><div className="flex items-center justify-between gap-3"><h3 className="display text-2xl">Your recorded request</h3><span className="mono text-[9px] text-muted-foreground">REQUEST ONLY</span></div><div className="mt-6 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">{[['Item', request.item], ['Category', request.category], ['Preferred merchant', request.merchant || 'Not specified'], ['Maximum total, including taxes & fees', money(request.budgetCents)]].map(([label, value]) => <div key={label}><span className="text-xs text-muted-foreground">{label}</span><p data-testid={`text-request-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`} className="mt-1 font-semibold">{value}</p></div>)}</div></div>
