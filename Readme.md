@@ -8,7 +8,7 @@ A user signs in with an nd.edu email and an invite code, then fills in a short f
 
 ## Try it
 
-- Prototype: [Hugh: paste your live Replit link here]
+- Prototype: https://campus-cart-pilot.replit.app
 - Access is invite-only. Invite code for testers and reviewers: `IRISH-PILOT`
 - To test the card step, use Stripe's test card 4242 4242 4242 4242 with any future expiry and any 3-digit CVC. Do not enter a real card.
 
