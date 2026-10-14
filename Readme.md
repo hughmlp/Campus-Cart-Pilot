@@ -1,0 +1,43 @@
+# Campus Cart
+
+Campus Cart is a mobile-first web prototype where Notre Dame students and staff ask an agent to buy something, so we can see which items and merchants people want an agent to purchase from and whether they would connect a card to let it happen. It is the demand experiment behind Aimsigh, which I am building with Jack O'Connell.
+
+## What the first working slice does
+
+A user opens the link, speaks or types a shopping request, and can edit what was captured. The app pulls out the item, the merchant if one was named, and a maximum budget including taxes and fees. If something is missing it asks for it and does not invent a merchant or a price. The user then sees "Request received, no order placed", or "We can't purchase from this merchant yet. Your request has been recorded." if the merchant is not on the support list. No order is ever placed in this version.
+
+## Try it
+
+- Prototype: [Hugh: live Replit link]
+- Access is invite-only: [Hugh: invite code, or how a tester gets one]
+- Open it on a phone, tap the microphone or type a request such as "running socks from a sports retailer under $30", and submit.
+
+## AI role and what is working
+
+The future AI system is a purchasing agent that discovers a merchant, uses its website and pays for what the user asked. That part is not built, and real purchasing is switched off on purpose.
+
+| Behavior | Status |
+| --- | --- |
+| Typing a request and seeing the status screen | [Hugh: Working] |
+| Voice transcription | [Hugh: Working / Simulated] |
+| Extracting item, merchant and budget | [Hugh: Working / Simulated] |
+| Card setup through Stripe, test mode | [Hugh: Working / Simulated] |
+| Discovering a merchant, checking out, paying | Not built, disabled by design |
+
+## Test results
+
+| Test | Input or action | What happened | Pass, partial, or fail |
+| --- | --- | --- | --- |
+| Typical case | "Running socks from a sports retailer for under $30" | [Hugh] | [Hugh] |
+| Challenge case | "Something for a cold" (no merchant, no budget) | [Hugh] | [Hugh] |
+| Invalid or empty case | A merchant not on the support list, and one empty submit | [Hugh] | [Hugh] |
+
+## Known limitations
+
+1. [Hugh: which of voice, extraction or card setup is simulated, and what it does instead.]
+2. Real purchasing is disabled, so the app records requests and places no orders. The dashboard labels rankings "Requested purchases", not items bought.
+3. [Hugh: one more true limitation, such as no saved data or a confusing screen.]
+
+## Secrets
+
+No passwords, API keys or tokens are stored in this repository. Credentials live in environment secrets, and card setup runs only through Stripe-hosted Checkout in test mode.
