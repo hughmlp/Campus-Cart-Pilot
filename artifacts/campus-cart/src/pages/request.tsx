@@ -54,7 +54,12 @@ function RequestExperience() {
   const [chatInput, setChatInput] = useState('');
   const [draftDone, setDraftDone] = useState(false);
   const [readAloud, setReadAloud] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const chatRef = useRef<ChatMessage[]>([]);
+  const audioEl = useRef<HTMLAudioElement | null>(null);
+  const speakToken = useRef(0);
+  const awaitingConfirm = useRef(false);
+  const submitRef = useRef<() => void>(() => undefined);
   const draftRef = useRef<RequestDraft>(emptyDraft);
   const readAloudRef = useRef(false);
   const voiceStateRef = useRef('idle');
@@ -142,16 +147,72 @@ function RequestExperience() {
     }
     stream.current?.getTracks().forEach(track => track.stop());
   }, []);
-  const stopSpeaking = () => { if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel(); };
+  const stopSpeaking = () => {
+    speakToken.current++;
+    audioEl.current?.pause();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    setSpeaking(false);
+  };
   const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window;
-  const speak = (text: string, listenAfter: boolean) => {
-    if (!readAloudRef.current || !canSpeak) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.02;
-    // Hands-free: after the assistant finishes a question, start listening for the answer.
-    utterance.onend = () => { if (listenAfter && readAloudRef.current && voiceStateRef.current === 'idle') toggleVoiceRef.current(); };
-    window.speechSynthesis.speak(utterance);
+  // Phones only allow audio that starts from a tap, so the first tap "unlocks" one shared audio element.
+  const unlockAudio = () => {
+    const audio = audioEl.current ?? new Audio();
+    audioEl.current = audio;
+    audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    audio.play().catch(() => undefined);
+  };
+  const speak = async (text: string, listenAfter: boolean) => {
+    if (!readAloudRef.current) return;
+    const token = ++speakToken.current;
+    let finished = false;
+    const finish = () => {
+      if (finished || token !== speakToken.current) return;
+      finished = true;
+      setSpeaking(false);
+      if (listenAfter && readAloudRef.current && voiceStateRef.current === 'idle') toggleVoiceRef.current();
+    };
+    const browserVoice = () => {
+      if (!canSpeak) { finish(); return; }
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.03;
+      utterance.onend = finish;
+      utterance.onerror = finish;
+      window.speechSynthesis.speak(utterance);
+      // Some phones never fire the end event, so do not wait forever.
+      window.setTimeout(finish, 3000 + text.length * 90);
+    };
+    setSpeaking(true);
+    try {
+      const response = await fetch('/api/campus-cart/requests/speech', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), credentials: 'same-origin',
+      });
+      if (!response.ok) throw new Error('Speech unavailable');
+      const blob = await response.blob();
+      if (token !== speakToken.current) return;
+      const audio = audioEl.current ?? new Audio();
+      audioEl.current = audio;
+      audio.src = URL.createObjectURL(blob);
+      audio.onended = finish;
+      audio.onerror = browserVoice;
+      await audio.play();
+    } catch {
+      if (token === speakToken.current) browserVoice();
+    }
+  };
+  const startVoiceMode = () => {
+    unlockAudio();
+    setError('');
+    readAloudRef.current = true;
+    setReadAloud(true);
+    speak(chatRef.current.length ? 'I’m listening.' : 'Hi! What would you like me to get?', true);
+  };
+  const stopVoiceMode = () => {
+    readAloudRef.current = false;
+    setReadAloud(false);
+    awaitingConfirm.current = false;
+    cancelVoice();
+    stopSpeaking();
   };
   const applyDraft = (draft: RequestDraft, source: 'ai' | 'rules', text: string) => {
     setSuggestion({ item: draft.item, category: draft.category, merchant: draft.merchant, budgetCents: draft.budgetCents, clarification: null, source });
@@ -166,7 +227,20 @@ function RequestExperience() {
     stopSpeaking();
     if (viaVoice) { readAloudRef.current = true; setReadAloud(true); }
     const messages: ChatMessage[] = [...chatRef.current, { role: 'user', content: clean }];
-    chatRef.current = messages; setChat(messages); setChatInput(''); setError(''); setDraftDone(false);
+    chatRef.current = messages; setChat(messages); setChatInput(''); setError('');
+    if (awaitingConfirm.current) {
+      awaitingConfirm.current = false;
+      const yes = /^\W*(yes|yeah|yep|yup|sure|send( it)?|correct|that'?s (right|correct)|ok(ay)?|go ahead|do it|looks good)\b/i.test(clean);
+      const no = /^\W*(no|nope|wrong|change|not quite|wait)\b/i.test(clean) && clean.split(/\s+/).length <= 3;
+      if (yes) { submitRef.current(); return; }
+      if (no) {
+        const reply = 'Okay, what should I change?';
+        const next: ChatMessage[] = [...messages, { role: 'assistant', content: reply }];
+        chatRef.current = next; setChat(next); setDraftDone(false); speak(reply, true);
+        return;
+      }
+    }
+    setDraftDone(false);
     const userText = messages.filter(m => m.role === 'user').map(m => m.content).join(' / ').slice(0, 240);
     setNarrative(userText);
     converse.mutate({ data: { messages: messages.slice(-24), draft: draftRef.current } }, {
@@ -176,7 +250,12 @@ function RequestExperience() {
         chatRef.current = next; setChat(next);
         applyDraft(turn.draft, turn.source, userText);
         setDraftDone(turn.done);
-        speak(turn.reply, !turn.done);
+        if (turn.done && readAloudRef.current) {
+          // Read the order back and wait for a spoken yes.
+          awaitingConfirm.current = true;
+          const price = `$${((turn.draft.budgetCents ?? 0) / 100).toFixed(2)}`;
+          speak(`Got it: ${turn.draft.item}, up to ${price}${turn.draft.merchant ? ` from ${turn.draft.merchant}` : ''}. Should I send it?`, true);
+        } else speak(turn.reply, !turn.done);
       },
       onError: failure => {
         applySuggestion(null, userText);
@@ -334,6 +413,8 @@ function RequestExperience() {
       onError: () => setError('Your request was not recorded. Please try again. No order was placed.'),
     });
   };
+  submitRef.current = submitRequest;
+  useEffect(() => { if (request?.id && readAloudRef.current) speak('Done. Your request is recorded. No order was placed.', false); }, [request?.id]);
   const startNewRequest = () => {
     cancelVoice();
     setLocalRequest(null);
@@ -427,6 +508,7 @@ function RequestExperience() {
              <button data-testid="button-next-role" onClick={nextFromRole} disabled={saveProfile.isPending} className="btn-primary lift mt-9 w-full sm:w-auto">{saveProfile.isPending ? 'Saving…' : 'Continue'} <ArrowRight size={17}/></button>
            </div>}
            {step === 1 && <div className="page-enter"><SectionLabel>TELL US WHAT YOU NEED</SectionLabel><h2 className="display text-4xl sm:text-5xl">What can I get for you?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">Just talk or type. I’ll ask for anything I’m missing, and you’ll check everything before it’s sent.</p>
+             {config.data?.audioEnabled && (readAloud ? <div data-testid="panel-voice-mode" className="mt-7 rounded-[24px] border border-primary/30 bg-primary px-6 py-7 text-center text-primary-foreground"><p role="status" data-testid="status-voice-mode" className="display text-3xl">{voiceState === 'recording' ? 'Listening…' : voiceState === 'transcribing' ? 'Got it…' : converse.isPending ? 'Thinking…' : speaking ? 'Speaking…' : voiceState === 'starting' ? 'Starting the microphone…' : 'Your turn'}</p><p className="mt-2 text-xs text-primary-foreground/75">Talk naturally. Pause when you’re done. Say “yes” to send it at the end.</p><div className="mt-5 flex flex-wrap justify-center gap-3">{voiceState === 'idle' && !speaking && !converse.isPending && <button type="button" data-testid="button-voice-answer" onClick={toggleVoice} className="inline-flex items-center gap-2 rounded-full bg-primary-foreground px-5 py-3 text-sm font-bold text-primary"><Mic size={17}/> Tap to answer</button>}<button type="button" data-testid="button-stop-voice-mode" onClick={stopVoiceMode} className="inline-flex items-center gap-2 rounded-full border border-primary-foreground/40 px-5 py-3 text-sm font-semibold"><VolumeX size={16}/> Stop voice mode</button></div></div> : <div className="mt-7"><button type="button" data-testid="button-start-voice-order" onClick={startVoiceMode} className="btn-primary lift flex w-full items-center justify-center gap-3 !min-h-20 text-lg"><Mic size={26}/> Tap to order by voice</button><p className="mt-3 text-center text-xs leading-relaxed text-muted-foreground">I’ll ask you questions out loud and listen for your answers, so you don’t have to look at the screen.</p></div>)}
              <div data-testid="chat-thread" aria-live="polite" className="mt-8 space-y-3">
                {[{ role: 'assistant' as const, content: greeting }, ...chat].map((message, index) => <div key={index} data-testid={`chat-${message.role}-${index}`} className={message.role === 'assistant' ? 'mr-auto max-w-[88%] rounded-2xl rounded-bl-sm bg-[#e8dbc2]/70 px-4 py-3 text-sm leading-relaxed' : 'ml-auto max-w-[88%] rounded-2xl rounded-br-sm bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground'}>{message.content}</div>)}
                {converse.isPending && <div role="status" className="mr-auto max-w-[88%] rounded-2xl rounded-bl-sm bg-[#e8dbc2]/70 px-4 py-3 text-sm text-muted-foreground">Thinking…</div>}
@@ -442,7 +524,6 @@ function RequestExperience() {
                  </form>
                </div>
                <p role="status" data-testid="status-voice" className="mt-3 text-xs leading-relaxed text-muted-foreground">{voiceState === 'starting' ? 'Starting the microphone…' : voiceState === 'recording' ? `Listening… ${seconds}s. Pause when you’re done and it stops by itself.` : voiceState === 'transcribing' ? 'Writing down what you said…' : config.data?.audioEnabled ? 'Tap the microphone to talk, or type. Your recording is turned into text and deleted right away.' : 'Voice input is not enabled for this pilot. Type your answer.'}</p>
-               {config.data?.audioEnabled && canSpeak && <button type="button" data-testid="button-read-aloud" onClick={() => { const next = !readAloud; setReadAloud(next); readAloudRef.current = next; if (!next) stopSpeaking(); }} className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-muted-foreground">{readAloud ? <Volume2 size={15}/> : <VolumeX size={15}/>} Read questions aloud and listen for answers: {readAloud ? 'on' : 'off'}</button>}
              </div>
              {!profile.data?.role && <div className="mt-8"><button data-testid="button-back-role" onClick={() => { cancelVoice(); stopSpeaking(); setError(''); setStep(0); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button></div>}</div>}
           {step === 2 && <form onSubmit={toReview} className="page-enter"><SectionLabel>MAKE IT SPECIFIC</SectionLabel><h2 className="display text-4xl sm:text-5xl">The details matter.</h2><p className="mt-4 text-sm text-muted-foreground">Nothing is bought here. These fields make your request useful for research.</p>{narrative.trim() && <div data-testid="panel-your-words" className="mt-6 rounded-2xl border border-border bg-background p-5"><span className="mono text-[9px] font-bold text-muted-foreground">YOUR WORDS</span><p className="mt-2 text-sm font-semibold leading-relaxed">“{narrative.trim()}”</p><p data-testid="text-suggestion-source" className="mt-3 text-xs leading-relaxed text-muted-foreground">{suggestion ? `${sourceLabel}. Check every field below: you can edit anything, and nothing is recorded until you submit.` : 'We couldn’t suggest details this time, so please fill them in yourself.'}</p><button type="button" data-testid="button-edit-words" onClick={() => { setError(''); setStep(1); }} className="mt-3 mr-5 text-xs font-semibold text-primary underline underline-offset-4">Edit my words</button>{suggestion && <button type="button" data-testid="button-clear-suggestions" onClick={clearSuggestions} className="mt-3 text-xs font-semibold text-destructive underline underline-offset-4">Reject suggestions and start blank</button>}</div>}{stillVague && <div role="status" data-testid="status-clarification" className="mt-4 rounded-2xl border border-[#dbbc7d] bg-[#f7ecd2] p-4 text-sm leading-relaxed text-[#745823]"><strong>One question:</strong> {suggestion!.clarification}</div>}<div className="mt-8 space-y-5"><div><label htmlFor="item" className="label">Item you need <span className="text-destructive">*</span>{tag('item')}</label><input id="item" data-testid="input-item" className="field" value={item} onChange={e => setItem(e.target.value)} maxLength={240} placeholder="Describe the item"/></div><div><label htmlFor="category" className="label">Category <span className="text-destructive">*</span>{tag('category')}</label><input id="category" data-testid="input-category" className="field" value={category} onChange={e => setCategory(e.target.value)} maxLength={80} placeholder="What kind of item is it?"/></div><div><label htmlFor="merchant" className="label">Preferred merchant <span className="font-normal text-muted-foreground">· optional</span>{tag('merchant')}</label><input id="merchant" data-testid="input-merchant" className="field" value={merchant} onChange={e => setMerchant(e.target.value)} maxLength={160} placeholder="Leave blank if you’re flexible"/>{merchant.trim() && !supported && <p data-testid="status-merchant-unsupported-preview" className="mt-2 text-xs text-[#8a662d]">We can’t purchase from this merchant yet. Your request has been recorded only after you submit it.</p>}</div><div><label htmlFor="budget" className="label">Maximum total budget <span className="text-destructive">*</span>{tag('budget')}</label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">$</span><input id="budget" data-testid="input-budget" inputMode="decimal" className="field !pl-8" value={budget} onChange={e => setBudget(e.target.value)} placeholder="0.00"/></div><p className="mt-2 text-xs text-muted-foreground">The maximum total you would spend, including taxes and fees. This is not a price quote.{suggestion && suggestion.budgetCents == null && !budget.trim() ? ' We didn’t see a budget in your sentence, so it’s blank.' : ''}</p></div></div><div className="mt-9 flex items-center justify-between gap-3"><button type="button" data-testid="button-back-request" onClick={() => { setError(''); setStep(1); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-review-request" className="btn-primary lift">Review request <ArrowRight size={17}/></button></div></form>}

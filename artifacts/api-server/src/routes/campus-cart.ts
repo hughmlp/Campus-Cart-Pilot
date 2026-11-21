@@ -171,6 +171,7 @@ async function converseWithModel(messages: { role: "user" | "assistant"; content
         "Your job is to collect: a specific item, a maximum total budget in dollars, and optionally a preferred store. Infer the category yourself and never ask for it.",
         "Ask for ONE missing thing at a time, in one short, warm, plain sentence. Order: specific item (only if it is very general, like 'something for a cold'), then budget, then store.",
         "Never guess a budget, store or brand the participant did not say. If they say they have no store preference, set merchant_answered to true and merchant to null.",
+        "If the participant corrects a detail they already gave (for example a different budget), update it.",
         "When item, budget and the store question are all settled, set done to true and reply with a one-sentence confirmation that tells them to check the details and send it.",
         'Return JSON: {"item": string|null, "category": string|null, "merchant": string|null, "budget_dollars": number|null, "merchant_answered": boolean, "done": boolean, "reply": string}.',
         merchants.length ? `Stores the pilot can currently support: ${merchants.join(", ")}. Use the exact name if the participant mentions one.` : "",
@@ -210,6 +211,29 @@ router.post("/campus-cart/requests/converse", async (req, res): Promise<void> =>
     req.log.error({ err: error }, "Conversation turn failed; using rules fallback");
   }
   res.json(converseWithRules(messages.filter((m) => m.role === "user").map((m) => m.content), draft, merchants));
+});
+
+// Spoken replies for the hands-free voice mode. Text in, MP3 out; nothing is stored.
+router.post("/campus-cart/requests/speech", async (req, res): Promise<void> => {
+  if (!await participant(req)) { res.status(401).json({ error: "Participant profile required" }); return; }
+  const settings = transcriptionSettings();
+  const text = typeof req.body?.text === "string" ? req.body.text.trim().slice(0, 400) : "";
+  if (!settings) { res.status(503).json({ error: "Spoken replies unavailable" }); return; }
+  if (!text) { res.status(400).json({ error: "Nothing to say" }); return; }
+  try {
+    const client = new OpenAI(settings);
+    const audio = await client.audio.speech.create({
+      model: process.env.AI_TTS_MODEL || "gpt-4o-mini-tts",
+      voice: (process.env.AI_TTS_VOICE || "alloy") as "alloy",
+      input: text,
+      instructions: "Warm, brisk and friendly, like a helpful campus assistant. Keep a natural pace.",
+      response_format: "mp3",
+    });
+    res.type("audio/mpeg").send(Buffer.from(await audio.arrayBuffer()));
+  } catch (error) {
+    req.log.error({ err: error }, "Speech synthesis failed");
+    res.status(502).json({ error: "Could not create spoken reply" });
+  }
 });
 
 router.post("/campus-cart/pilot/access", (req, res) => {

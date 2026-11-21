@@ -73,6 +73,10 @@ export function converseWithRules(userMessages: string[], draft: Draft, merchant
         budgetCents: s.budgetCents ?? next.budgetCents,
         merchantDecided: next.merchantDecided || Boolean(s.merchant),
       };
+    } else if (asked === null) {
+      // The draft was complete and the participant said something more: treat it as a correction.
+      const corrected = parseBudgetCents(latest);
+      if (corrected != null) next.budgetCents = corrected;
     } else if (asked === "budget") {
       next.budgetCents = parseBudgetCents(latest) ?? next.budgetCents;
     } else if (asked === "merchant") {
