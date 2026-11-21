@@ -18,6 +18,12 @@ export interface ResearchParticipant {
   merchant: string | null;
   /** @nullable */
   budgetCents: number | null;
+  /** @nullable */
+  narrative: string | null;
+  /** @nullable */
+  extractionSource: string | null;
+  /** @nullable */
+  editedSuggestion: boolean | null;
   cardStepViews: number;
   setupStarts: number;
   setupCompletions: number;

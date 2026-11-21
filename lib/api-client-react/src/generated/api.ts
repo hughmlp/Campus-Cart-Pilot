@@ -27,11 +27,13 @@ import type {
   CreatedStatus,
   FunnelEventInput,
   HealthStatus,
+  InterpretRequestInput,
   ParticipantFeedbackInput,
   ParticipantProfile,
   ParticipantProfileInput,
   PilotAccess,
   PilotAccessInput,
+  RequestSuggestion,
   RequestTranscript,
   ResearchDashboard,
   ShoppingRequest,
@@ -649,6 +651,95 @@ export const useTranscribeShoppingRequest = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getTranscribeShoppingRequestMutationOptions(options));
+    }
+
+export const getInterpretShoppingRequestUrl = () => {
+
+
+
+
+  return `/api/campus-cart/requests/interpret`
+}
+
+/**
+ * Reads one short sentence and returns suggested item, category, merchant and budget for the participant to check and edit. Nothing is saved and no order is placed. Fields not stated in the sentence are returned as null, and a clarification question is returned when the item is too vague to act on.
+ * @summary Suggest structured fields from a participant's own words, without recording anything
+ */
+export const interpretShoppingRequest = async (interpretRequestInput: InterpretRequestInput, options?: Parameters<typeof customFetch>[1]): Promise<RequestSuggestion> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<RequestSuggestion>(getInterpretShoppingRequestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(interpretRequestInput)
+  }
+);}
+
+
+
+
+
+export const getInterpretShoppingRequestMutationKey = () => ['interpretShoppingRequest'] as const;
+
+export const getInterpretShoppingRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof interpretShoppingRequest>>, TError,InterpretShoppingRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof interpretShoppingRequest>>, TError,InterpretShoppingRequestMutationVariables, TContext> => {
+
+const mutationKey = getInterpretShoppingRequestMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof interpretShoppingRequest>>, InterpretShoppingRequestMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  interpretShoppingRequest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InterpretShoppingRequestMutationResult = NonNullable<Awaited<ReturnType<typeof interpretShoppingRequest>>>
+    export type InterpretShoppingRequestMutationBody = BodyType<InterpretRequestInput>
+    export type InterpretShoppingRequestMutationError = ErrorType<void>
+    export type InterpretShoppingRequestMutationVariables = {data: BodyType<InterpretRequestInput>}
+
+    /**
+ * @summary Suggest structured fields from a participant's own words, without recording anything
+ */
+export const useInterpretShoppingRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof interpretShoppingRequest>>, TError,InterpretShoppingRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof interpretShoppingRequest>>,
+        TError,
+        InterpretShoppingRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getInterpretShoppingRequestMutationOptions(options));
     }
 
 export const getGetMyShoppingRequestUrl = () => {

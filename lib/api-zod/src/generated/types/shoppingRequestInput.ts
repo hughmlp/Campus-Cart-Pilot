@@ -5,6 +5,7 @@
  * Campus Cart pilot APIs
  * OpenAPI spec version: 0.1.0
  */
+import type { ShoppingRequestInputExtractionSource } from './shoppingRequestInputExtractionSource';
 
 export interface ShoppingRequestInput {
   /**
@@ -27,4 +28,12 @@ export interface ShoppingRequestInput {
      * @maximum 100000000
      */
   budgetCents: number;
+  /**
+     * @maxLength 240
+     * @nullable
+     */
+  narrative?: string | null;
+  /** @nullable */
+  extractionSource?: ShoppingRequestInputExtractionSource;
+  editedSuggestion?: boolean;
 }

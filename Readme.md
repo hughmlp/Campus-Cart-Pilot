@@ -37,7 +37,7 @@ The future AI system is a purchasing agent that discovers a merchant, uses its w
 | Merchant support check ("We can't purchase from this merchant yet") | Working |
 | Card setup through Stripe, test mode | Working, test mode only |
 | Voice transcription | Working. Speech is transcribed on the server, the raw audio is deleted afterward, and the text stays editable. |
-| Extracting item and budget from a spoken or typed request | Simulated. Voice produces editable text, but the item, category and budget fields are filled in by the user, not extracted automatically. |
+| Extracting item, category, merchant and budget from a spoken or typed request | Working. A language model suggests the fields from the user's sentence when the AI integration is configured. If it is not, a labeled text-matching fallback (not AI) is used. The user can edit or reject every suggestion. |
 | Purchasing agent that discovers, checks out and pays | Not built, disabled by design |
 
 ## Test results
@@ -53,6 +53,15 @@ The future AI system is a purchasing agent that discovers a merchant, uses its w
 1. The app records vague items as typed and does not ask a follow-up question, so a request like "something for a cold" reaches the dashboard with little detail. A next step is to prompt for a more specific product when the item is too general.
 2. Real purchasing is disabled in this version, so the app only records requests and places no orders. The purchasing agent itself is a future step, and the dashboard labels its rankings "Requested purchases", not items bought.
 3. Card setup works only in Stripe test mode and only when a test key is configured. Without a key, the card step is disabled with an explanation, so the card step cannot be shown on a deployment that lacks one.
+
+## Revision (Project Prototype Revision)
+
+- [Revision documentation](revision.md): priority improvements, response to peer feedback, tests, before and after, risk response and next priorities.
+- [AI-use disclosure (draft)](ai-use-disclosure.md)
+
+## Demo Video
+
+Link to the draft demo on Google Drive: TODO add link (viewing access for Emelia Hughes and Samuel Huang).
 
 ## Secrets
 
