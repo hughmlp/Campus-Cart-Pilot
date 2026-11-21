@@ -2,7 +2,11 @@
 
 Aimsigh, the startup I am building with Jack O'Connell, is building the observability layer for agentic commerce. Personal agents such as Muse and Instinct are starting to make purchases on their own, and as founders we need visibility into what those agents are buying so we know which retailers to target. Campus Cart is the experiment for that. It is a mobile-first web prototype where Notre Dame students and staff tell an agent, by voice or text, what they would want it to buy. We record the items, categories and merchants people ask for, and whether they would connect a card to let it happen, so we can see which retailers to target first. It is a research prototype: no order is ever placed and no one is charged.
 
-## What the first working slice does
+## What it does now (revised)
+
+A signed-in participant taps "Tap to order by voice" (or types) and has a short conversation with an assistant. The assistant asks only for what is missing: a specific item, a maximum total budget including taxes and fees, and an optional store. It works out the category itself. It then reads the order back, and the participant says yes (or taps Review and send) to record it. The app records the request as "Request only" and confirms that no order was placed and no payment was taken. Details of the revision, the peer feedback, the five tests and the risk response are in [revision.md](revision.md).
+
+## What the first working slice did
 
 A user signs in with an nd.edu email and an invite code, then fills in a short form with the item they need, a category, an optional preferred merchant and a maximum total budget including taxes and fees. The user taps Review request to check the details, then Submit request. The app records the request as "Request only" and confirms that no order was placed and no payment was taken. If the merchant is not on the support list, it says "We can't purchase from this merchant yet. Your request has been recorded." After the request is recorded, the user can optionally connect a card through Stripe in test mode, and can disconnect it again. The card step is separate from the request, and no purchase or charge is ever made in this version.
 
@@ -20,7 +24,7 @@ Sign-in uses an email code, so there is no password to remember. Anyone with an 
 2. Enter your nd.edu email address and continue. Clerk, the sign-in service, emails you a one-time verification code.
 3. Open that email, copy the code and enter it in the app. Check your spam folder if it does not arrive within a minute.
 4. On the "About you" screen, choose the role that fits you (for example student or staff) and enter the invite code `IRISH-PILOT`. The app will not save your role without a valid invite code.
-5. You land on the request form. Fill in the item, category and budget, add a merchant if you like, tap Review request, then Submit request. The confirmation screen then offers the optional card step.
+5. You land on the request conversation. Tap "Tap to order by voice" and say what you want, or type it in the box. Answer the budget and store questions, then say yes or tap Review and send. The confirmation screen then offers the optional card step. The "About you" step only appears the first time you sign in.
 
 Only nd.edu addresses are accepted, so a personal Gmail address will not work. If you do not have an nd.edu address, the test results below show what each screen does.
 
@@ -40,7 +44,9 @@ The future AI system is a purchasing agent that discovers a merchant, uses its w
 | Collecting the request details | Working. The assistant (`gpt-4.1-mini` by default, set with `AI_CONVERSE_MODEL`) keeps a draft of item, category, merchant and budget and asks the next question. The server decides when the draft is complete and never accepts a budget the user did not say. If no model is configured or a call fails, a labeled rule-based version asks the same questions (not AI). The user can edit or reject everything. |
 | Purchasing agent that discovers, checks out and pays | Not built, disabled by design |
 
-## Test results
+## Test results (first working slice)
+
+These are the original tests of the first version, which used a form. The tests of the revised conversation are in [revision.md](revision.md).
 
 | Test | Input or action | What happened | Pass, partial, or fail |
 | --- | --- | --- | --- |
@@ -50,7 +56,7 @@ The future AI system is a purchasing agent that discovers a merchant, uses its w
 
 ## Known limitations
 
-1. The app records vague items as typed and does not ask a follow-up question, so a request like "something for a cold" reaches the dashboard with little detail. A next step is to prompt for a more specific product when the item is too general.
+1. Speech recognition is not always accurate (for example it once heard "amen" for "Under Armour"), and in one run the assistant lost the item halfway through a conversation. Both have fixes that are not fully retested. See [revision.md](revision.md).
 2. Real purchasing is disabled in this version, so the app only records requests and places no orders. The purchasing agent itself is a future step, and the dashboard labels its rankings "Requested purchases", not items bought.
 3. Card setup works only in Stripe test mode and only when a test key is configured. Without a key, the card step is disabled with an explanation, so the card step cannot be shown on a deployment that lacks one.
 
