@@ -60,6 +60,7 @@ function RequestExperience() {
   const audioEl = useRef<HTMLAudioElement | null>(null);
   const speakToken = useRef(0);
   const awaitingConfirm = useRef(false);
+  const busy = useRef(false);
   const submitRef = useRef<() => void>(() => undefined);
   const draftRef = useRef<RequestDraft>(emptyDraft);
   const readAloudRef = useRef(false);
@@ -162,17 +163,20 @@ function RequestExperience() {
     audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
     audio.play().catch(() => undefined);
   };
-  const speak = async (text: string, listenAfter: boolean, browserOnly = false) => {
-    if (!readAloudRef.current) return;
+  // Fetches the spoken version first and returns a function that starts playing it. That lets the
+  // caller show the text at the same moment the voice starts, so the two never drift apart.
+  const prepareSpeech = async (text: string, listenAfter: boolean): Promise<() => void> => {
     const token = ++speakToken.current;
     let finished = false;
     const finish = () => {
       if (finished || token !== speakToken.current) return;
       finished = true;
       setSpeaking(false);
-      if (listenAfter && readAloudRef.current && voiceStateRef.current === 'idle') toggleVoiceRef.current();
+      // A short pause so the microphone does not pick up the end of the assistant's own voice.
+      if (listenAfter && readAloudRef.current) window.setTimeout(() => { if (voiceStateRef.current === 'idle' && readAloudRef.current && token === speakToken.current) toggleVoiceRef.current(); }, 450);
     };
     const browserVoice = () => {
+      if (token !== speakToken.current) return;
       if (!canSpeak) { setVoiceNote('This browser can’t speak out loud. Use the text below or try Safari or Chrome.'); finish(); return; }
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
@@ -185,30 +189,39 @@ function RequestExperience() {
       utterance.onerror = finish;
       window.speechSynthesis.speak(utterance);
       // Some phones never fire the end event, so do not wait forever.
-      window.setTimeout(finish, 3000 + text.length * 90);
+      window.setTimeout(finish, 5000 + text.length * 110);
     };
-    setSpeaking(true);
-    if (browserOnly) { browserVoice(); return; }
     try {
       const response = await fetch('/api/campus-cart/requests/speech', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), credentials: 'same-origin',
       });
       if (!response.ok) throw new Error(`Speech unavailable (${response.status})`);
       const blob = await response.blob();
-      if (token !== speakToken.current) return;
       const audio = audioEl.current ?? new Audio();
       audioEl.current = audio;
-      audio.src = URL.createObjectURL(blob);
-      audio.onended = finish;
-      audio.onerror = browserVoice;
-      await audio.play();
-      setVoiceNote('');
+      return () => {
+        if (token !== speakToken.current) return;
+        setSpeaking(true);
+        audio.src = URL.createObjectURL(blob);
+        audio.onended = finish;
+        audio.onerror = browserVoice;
+        audio.play().then(() => setVoiceNote('')).catch(failure => {
+          setVoiceNote(`The natural voice is blocked (${failure instanceof Error ? failure.message : 'unknown'}), so I’m using your device’s voice. Check your volume and silent switch.`);
+          browserVoice();
+        });
+      };
     } catch (failure) {
-      if (token === speakToken.current) {
-        setVoiceNote(`The natural voice isn’t available (${failure instanceof Error ? failure.message : 'blocked'}), so I’m using your device’s voice. Check your volume and silent switch.`);
+      return () => {
+        if (token !== speakToken.current) return;
+        setSpeaking(true);
+        setVoiceNote(`The natural voice isn’t available (${failure instanceof Error ? failure.message : 'unknown'}), so I’m using your device’s voice.`);
         browserVoice();
-      }
+      };
     }
+  };
+  const speak = async (text: string, listenAfter: boolean) => {
+    if (!readAloudRef.current) return;
+    (await prepareSpeech(text, listenAfter))();
   };
   const startVoiceMode = () => {
     unlockAudio();
@@ -233,7 +246,7 @@ function RequestExperience() {
   };
   const sendUser = (text: string, viaVoice = false) => {
     const clean = text.trim().slice(0, 400);
-    if (converse.isPending) return;
+    if (converse.isPending || busy.current) return;
     if (!clean) { setError('Describe what you need to continue.'); return; }
     stopSpeaking();
     if (viaVoice) { readAloudRef.current = true; setReadAloud(true); }
@@ -254,21 +267,27 @@ function RequestExperience() {
     setDraftDone(false);
     const userText = messages.filter(m => m.role === 'user').map(m => m.content).join(' / ').slice(0, 240);
     setNarrative(userText);
+    busy.current = true;
     converse.mutate({ data: { messages: messages.slice(-24), draft: draftRef.current } }, {
-      onSuccess: turn => {
+      onSuccess: async turn => {
+        const voice = readAloudRef.current;
+        // In voice mode the screen shows exactly what is spoken: the order read back and a question.
+        const price = `$${((turn.draft.budgetCents ?? 0) / 100).toFixed(2)}`;
+        const shown = turn.done && voice
+          ? `Got it: ${turn.draft.item}, up to ${price}${turn.draft.merchant ? ` from ${turn.draft.merchant}` : ''}. Should I send it?`
+          : turn.reply;
+        const start = voice ? await prepareSpeech(shown, !turn.done || voice) : null;
         draftRef.current = turn.draft;
-        const next: ChatMessage[] = [...chatRef.current, { role: 'assistant', content: turn.reply }];
+        awaitingConfirm.current = turn.done && voice;
+        const next: ChatMessage[] = [...chatRef.current, { role: 'assistant', content: shown }];
         chatRef.current = next; setChat(next);
         applyDraft(turn.draft, turn.source, userText);
         setDraftDone(turn.done);
-        if (turn.done && readAloudRef.current) {
-          // Read the order back and wait for a spoken yes.
-          awaitingConfirm.current = true;
-          const price = `$${((turn.draft.budgetCents ?? 0) / 100).toFixed(2)}`;
-          speak(`Got it: ${turn.draft.item}, up to ${price}${turn.draft.merchant ? ` from ${turn.draft.merchant}` : ''}. Should I send it?`, true);
-        } else speak(turn.reply, !turn.done);
+        busy.current = false;
+        start?.();
       },
       onError: failure => {
+        busy.current = false;
         applySuggestion(null, userText);
         setStep(2);
         setError(`The assistant is unavailable right now${failure?.status ? ` (error ${failure.status})` : ''}, so please fill in the details yourself. Nothing has been recorded.`);
@@ -287,7 +306,7 @@ function RequestExperience() {
     setError('');
     const session = ++recordingSession.current;
     try {
-      const media = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const media = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       if (session !== recordingSession.current) { media.getTracks().forEach(track => track.stop()); return; }
       stream.current = media;
       const mimeType = ['audio/webm', 'audio/mp4', 'audio/ogg'].find(type => MediaRecorder.isTypeSupported(type));
@@ -321,7 +340,15 @@ function RequestExperience() {
           });
           if (!response.ok) throw new Error('Transcription failed');
           const result: { text: string } = await response.json();
-          if (!controller.signal.aborted && session === recordingSession.current) sendUser(result.text.trim(), true);
+          if (!controller.signal.aborted && session === recordingSession.current) {
+            const heard = result.text.trim();
+            const words = (text: string) => text.toLowerCase().replace(/[^a-z0-9$ ]+/g, ' ').split(/\s+/).filter(Boolean);
+            const lastSpoken = new Set(words([...chatRef.current].reverse().find(m => m.role === 'assistant')?.content ?? greeting));
+            const heardWords = words(heard);
+            const echo = heardWords.length >= 4 && heardWords.filter(w => lastSpoken.has(w)).length / heardWords.length >= 0.7;
+            if (echo) setVoiceNote('I think I heard my own voice, so I ignored it. Tap “Tap to answer” and speak after I finish, or lower the volume.');
+            else sendUser(heard, true);
+          }
         } catch {
           if (!controller.signal.aborted && session === recordingSession.current) setError('We couldn’t transcribe that recording. Please try again or type your request.');
         } finally {
