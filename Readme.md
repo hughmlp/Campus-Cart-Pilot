@@ -1,6 +1,6 @@
 # Campus Cart
 
-Campus Cart is a mobile-first web prototype where Notre Dame students and staff record what they would want an agent to buy, so we can see which items and merchants people ask for and whether they would connect a card to let it happen. It is a research prototype and the demand experiment behind Aimsigh, which I am building with Jack O'Connell.
+Aimsigh, the startup I am building with Jack O'Connell, is building the observability layer for agentic commerce. Personal agents such as Muse and Instinct are starting to make purchases on their own, and as founders we need visibility into what those agents are buying so we know which retailers to target. Campus Cart is the experiment for that. It is a mobile-first web prototype where Notre Dame students and staff tell an agent, by voice or text, what they would want it to buy. We record the items, categories and merchants people ask for, and whether they would connect a card to let it happen, so we can see which retailers to target first. It is a research prototype: no order is ever placed and no one is charged.
 
 ## What the first working slice does
 
