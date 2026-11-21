@@ -178,10 +178,10 @@ function RequestExperience() {
         setDraftDone(turn.done);
         speak(turn.reply, !turn.done);
       },
-      onError: () => {
+      onError: failure => {
         applySuggestion(null, userText);
         setStep(2);
-        setError('The assistant is unavailable right now, so please fill in the details yourself. Nothing has been recorded.');
+        setError(`The assistant is unavailable right now${failure?.status ? ` (error ${failure.status})` : ''}, so please fill in the details yourself. Nothing has been recorded.`);
       },
     });
   };
