@@ -159,6 +159,58 @@ export const InterpretShoppingRequestResponse = zod.object({
 
 
 /**
+ * Takes the conversation so far and the draft collected so far, and returns the updated draft plus the next short question for the participant. Asks only for what is missing (a specific item and a maximum budget, then an optional merchant). Nothing is saved and no order is placed.
+ * @summary One turn of a short conversation that collects the details of a request
+ */
+export const converseShoppingRequestBodyMessagesItemContentMax = 400;
+
+export const converseShoppingRequestBodyMessagesMax = 24;
+
+export const converseShoppingRequestBodyDraftItemMax = 240;
+
+export const converseShoppingRequestBodyDraftCategoryMax = 80;
+
+export const converseShoppingRequestBodyDraftMerchantMax = 160;
+
+
+
+export const ConverseShoppingRequestBody = zod.object({
+  "messages": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string().min(1).max(converseShoppingRequestBodyMessagesItemContentMax)
+})).min(1).max(converseShoppingRequestBodyMessagesMax),
+  "draft": zod.object({
+  "item": zod.string().max(converseShoppingRequestBodyDraftItemMax).nullable(),
+  "category": zod.string().max(converseShoppingRequestBodyDraftCategoryMax).nullable(),
+  "merchant": zod.string().max(converseShoppingRequestBodyDraftMerchantMax).nullable(),
+  "budgetCents": zod.number().int().nullable(),
+  "merchantDecided": zod.boolean()
+})
+})
+
+export const converseShoppingRequestResponseDraftItemMax = 240;
+
+export const converseShoppingRequestResponseDraftCategoryMax = 80;
+
+export const converseShoppingRequestResponseDraftMerchantMax = 160;
+
+
+
+export const ConverseShoppingRequestResponse = zod.object({
+  "reply": zod.string(),
+  "draft": zod.object({
+  "item": zod.string().max(converseShoppingRequestResponseDraftItemMax).nullable(),
+  "category": zod.string().max(converseShoppingRequestResponseDraftCategoryMax).nullable(),
+  "merchant": zod.string().max(converseShoppingRequestResponseDraftMerchantMax).nullable(),
+  "budgetCents": zod.number().int().nullable(),
+  "merchantDecided": zod.boolean()
+}),
+  "done": zod.boolean(),
+  "source": zod.enum(['ai', 'rules'])
+})
+
+
+/**
  * @summary Get the signed-in participant's latest request
  */
 export const GetMyShoppingRequestResponse = zod.object({

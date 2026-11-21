@@ -36,8 +36,8 @@ The future AI system is a purchasing agent that discovers a merchant, uses its w
 | Request form, review, recording and status screens | Working |
 | Merchant support check ("We can't purchase from this merchant yet") | Working |
 | Card setup through Stripe, test mode | Working, test mode only |
-| Voice ordering | Working. The first screen is voice-first: tap the microphone, say the request, and it stops by itself after a pause. The server transcribes it (`gpt-4o-transcribe`, with `gpt-4o-mini-transcribe` as a fallback), deletes the raw audio, and the same sentence goes straight into the AI intake step, so the user lands on suggested details without typing. The words stay editable by going back. |
-| Extracting item, category, merchant and budget from a spoken or typed request | Working. A language model (`gpt-4.1` by default) suggests the fields from the user's sentence when the AI integration is configured. If it is not, a labeled text-matching fallback (not AI) is used. The user can edit or reject every suggestion. |
+| Voice and chat ordering | Working. The request screen is a short conversation. The user says or types what they want, and an assistant asks only for what is missing (a specific item, a maximum budget, then an optional store). Category is inferred, never asked. Voice is transcribed on the server (`gpt-4o-transcribe`, falling back to `gpt-4o-mini-transcribe`), the audio is deleted afterward, and the assistant can read its questions aloud and listen for the answer, so the whole request can be hands-free. Typing works everywhere. The user checks a review screen before anything is recorded. |
+| Collecting the request details | Working. The assistant (`gpt-4.1` by default) keeps a draft of item, category, merchant and budget and asks the next question. The server decides when the draft is complete and never accepts a budget the user did not say. If no model is configured or a call fails, a labeled rule-based version asks the same questions (not AI). The user can edit or reject everything. |
 | Purchasing agent that discovers, checks out and pays | Not built, disabled by design |
 
 ## Test results

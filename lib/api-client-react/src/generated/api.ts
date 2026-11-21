@@ -24,6 +24,8 @@ import type {
   CardSetupStatus,
   CheckoutSession,
   CheckoutVerificationInput,
+  ConverseInput,
+  ConverseReply,
   CreatedStatus,
   FunnelEventInput,
   HealthStatus,
@@ -740,6 +742,95 @@ export const useInterpretShoppingRequest = <TError = ErrorType<void>,
         TContext
       > => {
       return useMutation(getInterpretShoppingRequestMutationOptions(options));
+    }
+
+export const getConverseShoppingRequestUrl = () => {
+
+
+
+
+  return `/api/campus-cart/requests/converse`
+}
+
+/**
+ * Takes the conversation so far and the draft collected so far, and returns the updated draft plus the next short question for the participant. Asks only for what is missing (a specific item and a maximum budget, then an optional merchant). Nothing is saved and no order is placed.
+ * @summary One turn of a short conversation that collects the details of a request
+ */
+export const converseShoppingRequest = async (converseInput: ConverseInput, options?: Parameters<typeof customFetch>[1]): Promise<ConverseReply> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<ConverseReply>(getConverseShoppingRequestUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(converseInput)
+  }
+);}
+
+
+
+
+
+export const getConverseShoppingRequestMutationKey = () => ['converseShoppingRequest'] as const;
+
+export const getConverseShoppingRequestMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof converseShoppingRequest>>, TError,ConverseShoppingRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof converseShoppingRequest>>, TError,ConverseShoppingRequestMutationVariables, TContext> => {
+
+const mutationKey = getConverseShoppingRequestMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof converseShoppingRequest>>, ConverseShoppingRequestMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  converseShoppingRequest(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConverseShoppingRequestMutationResult = NonNullable<Awaited<ReturnType<typeof converseShoppingRequest>>>
+    export type ConverseShoppingRequestMutationBody = BodyType<ConverseInput>
+    export type ConverseShoppingRequestMutationError = ErrorType<void>
+    export type ConverseShoppingRequestMutationVariables = {data: BodyType<ConverseInput>}
+
+    /**
+ * @summary One turn of a short conversation that collects the details of a request
+ */
+export const useConverseShoppingRequest = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof converseShoppingRequest>>, TError,ConverseShoppingRequestMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof converseShoppingRequest>>,
+        TError,
+        ConverseShoppingRequestMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConverseShoppingRequestMutationOptions(options));
     }
 
 export const getGetMyShoppingRequestUrl = () => {

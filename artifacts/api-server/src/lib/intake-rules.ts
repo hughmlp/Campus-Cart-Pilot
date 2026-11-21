@@ -1,6 +1,6 @@
 export type Suggestion = { item: string | null; category: string | null; merchant: string | null; budgetCents: number | null; clarification: string | null; source: "ai" | "rules" };
 const vagueWords = /\b(something|anything|stuff|things?|whatever|some)\b/i;
-const categoryHints: [RegExp, string][] = [
+export const categoryHints: [RegExp, string][] = [
   [/\b(sock|shirt|hoodie|jacket|shoe|sneaker|jeans|hat|clothing|sweater|pants)s?\b/i, "Clothing"],
   [/\b(book|textbook|notebook|pen|pencil|binder|calculator|folder)s?\b/i, "School supplies"],
   [/\b(snack|coffee|food|pizza|drink|water|meal|lunch|dinner)s?\b/i, "Food and drink"],

@@ -180,6 +180,29 @@ paths:
           description: Empty or invalid sentence
         "401":
           description: Participant profile required
+  /campus-cart/requests/converse:
+    post:
+      operationId: converseShoppingRequest
+      tags: [campus-cart]
+      summary: One turn of a short conversation that collects the details of a request
+      description: Takes the conversation so far and the draft collected so far, and returns the updated draft plus the next short question for the participant. Asks only for what is missing (a specific item and a maximum budget, then an optional merchant). Nothing is saved and no order is placed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConverseInput"
+      responses:
+        "200":
+          description: Updated draft and the assistant's next message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConverseReply"
+        "400":
+          description: Invalid conversation
+        "401":
+          description: Participant profile required
   /campus-cart/participants/me/request:
     get:
       operationId: getMyShoppingRequest
@@ -369,6 +392,39 @@ components:
         clarification: { type: ["string", "null"], maxLength: 300 }
         source: { type: string, enum: [ai, rules] }
       required: [item, category, merchant, budgetCents, clarification, source]
+    ConverseMessage:
+      type: object
+      properties:
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string, minLength: 1, maxLength: 400 }
+      required: [role, content]
+    RequestDraft:
+      type: object
+      properties:
+        item: { type: ["string", "null"], maxLength: 240 }
+        category: { type: ["string", "null"], maxLength: 80 }
+        merchant: { type: ["string", "null"], maxLength: 160 }
+        budgetCents: { type: ["integer", "null"] }
+        merchantDecided: { type: boolean }
+      required: [item, category, merchant, budgetCents, merchantDecided]
+    ConverseInput:
+      type: object
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 24
+          items: { $ref: "#/components/schemas/ConverseMessage" }
+        draft: { $ref: "#/components/schemas/RequestDraft" }
+      required: [messages, draft]
+    ConverseReply:
+      type: object
+      properties:
+        reply: { type: string }
+        draft: { $ref: "#/components/schemas/RequestDraft" }
+        done: { type: boolean }
+        source: { type: string, enum: [ai, rules] }
+      required: [reply, draft, done, source]
     RequestTranscript:
       type: object
       properties:

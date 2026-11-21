@@ -68,6 +68,68 @@ export interface RequestSuggestion {
   source: RequestSuggestionSource;
 }
 
+export type ConverseMessageRole = typeof ConverseMessageRole[keyof typeof ConverseMessageRole];
+
+
+export const ConverseMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface ConverseMessage {
+  role: ConverseMessageRole;
+  /**
+     * @minLength 1
+     * @maxLength 400
+     */
+  content: string;
+}
+
+export interface RequestDraft {
+  /**
+     * @maxLength 240
+     * @nullable
+     */
+  item: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  category: string | null;
+  /**
+     * @maxLength 160
+     * @nullable
+     */
+  merchant: string | null;
+  /** @nullable */
+  budgetCents: number | null;
+  merchantDecided: boolean;
+}
+
+export interface ConverseInput {
+  /**
+     * @minItems 1
+     * @maxItems 24
+     */
+  messages: ConverseMessage[];
+  draft: RequestDraft;
+}
+
+export type ConverseReplySource = typeof ConverseReplySource[keyof typeof ConverseReplySource];
+
+
+export const ConverseReplySource = {
+  ai: 'ai',
+  rules: 'rules',
+} as const;
+
+export interface ConverseReply {
+  reply: string;
+  draft: RequestDraft;
+  done: boolean;
+  source: ConverseReplySource;
+}
+
 export interface RequestTranscript {
   text: string;
 }
