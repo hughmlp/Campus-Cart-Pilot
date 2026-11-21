@@ -93,7 +93,7 @@ router.post("/campus-cart/requests/transcription", async (req, res, next): Promi
       language: "en",
       prompt: "A student says what they want to buy: an item, sometimes a store and a maximum price in dollars. Example: running socks under thirty dollars from the bookstore.",
     });
-    const primary = process.env.AI_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
+    const primary = process.env.AI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
     // Prefer the more accurate model; fall back to the smaller one so voice keeps working if it is unavailable.
     const result = await transcribe(primary).catch((error) => {
       req.log.warn({ err: error, model: primary }, "Primary transcription model failed; retrying with fallback");
@@ -160,7 +160,7 @@ async function converseWithModel(messages: { role: "user" | "assistant"; content
   const userText = messages.filter((m) => m.role === "user").map((m) => m.content);
   const transcript = messages.map((m) => `${m.role === "user" ? "Participant" : "Assistant"}: ${m.content}`).join("\n");
   const result = await client.chat.completions.create({
-    model: process.env.AI_INTAKE_MODEL || "gpt-4.1",
+    model: process.env.AI_CONVERSE_MODEL || "gpt-4.1-mini",
     temperature: 0.2,
     max_tokens: 350,
     response_format: { type: "json_object" },
@@ -215,48 +215,82 @@ router.post("/campus-cart/requests/converse", async (req, res): Promise<void> =>
 });
 
 // Spoken replies for the hands-free voice mode. Text in, MP3 out; nothing is stored.
+// The first request finds a voice model that works and remembers it, so later turns are fast.
+// If none work, that is remembered for a few minutes so the app can use the device voice at once.
+type VoicePlan = { source: "own" | "integration"; model: string; kind: "speech" | "chat" };
+let voicePlan: VoicePlan | null = null;
+let voiceDownUntil = 0;
+let voiceFailures: string[] = [];
+
+const voiceClients = (): { source: "own" | "integration"; client: OpenAI }[] => {
+  const clients: { source: "own" | "integration"; client: OpenAI }[] = [];
+  // A key you add yourself (OPENAI_API_KEY) is used first because it supports every OpenAI voice model.
+  if (process.env.OPENAI_API_KEY) clients.push({ source: "own", client: new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) });
+  const integration = transcriptionSettings();
+  if (integration) clients.push({ source: "integration", client: new OpenAI(integration) });
+  return clients;
+};
+
+async function synthesize(plan: VoicePlan, text: string): Promise<Buffer> {
+  const entry = voiceClients().find((c) => c.source === plan.source);
+  if (!entry) throw new Error("Voice client unavailable");
+  const voice = (process.env.AI_TTS_VOICE || "alloy") as "alloy";
+  if (plan.kind === "speech") {
+    const audio = await entry.client.audio.speech.create({
+      model: plan.model, voice, input: text, response_format: "mp3",
+      ...(plan.model === "gpt-4o-mini-tts" ? { instructions: "Warm, brisk and friendly, like a helpful campus assistant. Keep a natural pace." } : {}),
+    });
+    return Buffer.from(await audio.arrayBuffer());
+  }
+  const completion = await entry.client.chat.completions.create({
+    model: plan.model,
+    modalities: ["text", "audio"],
+    audio: { voice, format: "mp3" },
+    messages: [
+      { role: "system", content: "Read the user's message aloud exactly as written, in a warm, brisk, friendly voice. Say nothing else." },
+      { role: "user", content: text },
+    ],
+  } as never) as unknown as { choices: { message: { audio?: { data?: string } } }[] };
+  const data = completion.choices[0]?.message?.audio?.data;
+  if (!data) throw new Error("No audio returned");
+  return Buffer.from(data, "base64");
+}
+
 router.post("/campus-cart/requests/speech", async (req, res): Promise<void> => {
   if (!await participant(req)) { res.status(401).json({ error: "Participant profile required" }); return; }
-  const settings = transcriptionSettings();
   const text = typeof req.body?.text === "string" ? req.body.text.trim().slice(0, 400) : "";
-  if (!settings) { res.status(503).json({ error: "Spoken replies unavailable" }); return; }
+  if (!voiceClients().length) { res.status(503).json({ error: "Spoken replies unavailable", detail: "no voice service configured" }); return; }
   if (!text) { res.status(400).json({ error: "Nothing to say" }); return; }
+  if (Date.now() < voiceDownUntil) { res.status(503).json({ error: "Spoken replies unavailable", detail: voiceFailures[0] ?? "no voice model available" }); return; }
   try {
-    const client = new OpenAI(settings);
-    const voice = (process.env.AI_TTS_VOICE || "alloy") as "alloy";
-    const speechModel = (model: string, extra: Record<string, unknown> = {}) => async () => {
-      const audio = await client.audio.speech.create({ model, voice, input: text, response_format: "mp3", ...extra });
-      return Buffer.from(await audio.arrayBuffer());
-    };
-    // Some model gateways only offer certain voice models, so try them in order and use the first that works.
-    const audioChat = (model: string) => async () => {
-      const completion = await client.chat.completions.create({
-        model,
-        modalities: ["text", "audio"],
-        audio: { voice, format: "mp3" },
-        messages: [
-          { role: "system", content: "Read the user's message aloud exactly as written, in a warm, brisk, friendly voice. Say nothing else." },
-          { role: "user", content: text },
-        ],
-      } as never) as unknown as { choices: { message: { audio?: { data?: string } } }[] };
-      const data = completion.choices[0]?.message?.audio?.data;
-      if (!data) throw new Error("No audio returned");
-      return Buffer.from(data, "base64");
-    };
-    const attempts: [string, () => Promise<Buffer>][] = [
-      [process.env.AI_TTS_MODEL || "gpt-4o-mini-tts", speechModel(process.env.AI_TTS_MODEL || "gpt-4o-mini-tts", { instructions: "Warm, brisk and friendly, like a helpful campus assistant. Keep a natural pace." })],
-      ["tts-1-hd", speechModel("tts-1-hd")],
-      ["tts-1", speechModel("tts-1")],
-      ["gpt-audio-mini", audioChat("gpt-audio-mini")],
-      ["gpt-audio", audioChat("gpt-audio")],
-    ];
-    let mp3: Buffer | null = null;
-    for (const [name, attempt] of attempts) {
-      try { mp3 = await attempt(); res.setHeader("X-Voice-Model", name); break; }
-      catch (error) { req.log.warn({ err: error, model: name }, "Voice model failed; trying the next one"); }
+    if (voicePlan) {
+      try { res.type("audio/mpeg").send(await synthesize(voicePlan, text)); return; }
+      catch (error) { req.log.warn({ err: error, plan: voicePlan }, "Remembered voice model failed; searching again"); voicePlan = null; }
     }
-    if (!mp3) throw new Error("No voice model available");
-    res.type("audio/mpeg").send(mp3);
+    const preferred = process.env.AI_TTS_MODEL || "gpt-4o-mini-tts";
+    const candidates: VoicePlan[] = [];
+    for (const { source } of voiceClients()) {
+      candidates.push(
+        { source, model: preferred, kind: "speech" }, { source, model: "tts-1", kind: "speech" },
+        { source, model: "gpt-audio-mini", kind: "chat" }, { source, model: "gpt-audio", kind: "chat" },
+      );
+    }
+    voiceFailures = [];
+    for (const plan of candidates) {
+      try {
+        const mp3 = await synthesize(plan, text);
+        voicePlan = plan;
+        req.log.info({ plan }, "Voice model selected");
+        res.type("audio/mpeg").send(mp3);
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message.slice(0, 120) : "failed";
+        voiceFailures.push(`${plan.source}/${plan.model}: ${message}`);
+        req.log.warn({ err: error, plan }, "Voice model failed; trying the next one");
+      }
+    }
+    voiceDownUntil = Date.now() + 10 * 60 * 1000;
+    res.status(502).json({ error: "Could not create spoken reply", detail: voiceFailures[0] ?? "no voice model available" });
   } catch (error) {
     req.log.error({ err: error }, "Speech synthesis failed");
     res.status(502).json({ error: "Could not create spoken reply" });

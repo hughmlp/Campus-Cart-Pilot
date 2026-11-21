@@ -28,7 +28,7 @@ The first prompt gives an example sentence with a budget.
 
 ## 3. Evaluation
 
-How the AI behavior is produced: the intake step calls a language model through the Replit AI Integrations for OpenAI (default model `gpt-4.1`, set with `AI_INTAKE_MODEL`; transcription uses `gpt-4o-transcribe`, set with `AI_TRANSCRIBE_MODEL`, and retries with `gpt-4o-mini-transcribe` if that fails). If no model is configured, or the call fails, the server falls back to a small text-matching function (`artifacts/api-server/src/lib/intake-rules.ts`). Every suggestion is labeled in the interface as AI-suggested or as a simple text-matching suggestion. The fallback is not AI.
+How the AI behavior is produced: the intake step calls a language model through the Replit AI Integrations for OpenAI (default model `gpt-4.1-mini`, set with `AI_CONVERSE_MODEL`; transcription uses `gpt-4o-mini-transcribe`, set with `AI_TRANSCRIBE_MODEL`). If no model is configured, or the call fails, the server falls back to a small text-matching function (`artifacts/api-server/src/lib/intake-rules.ts`). Every suggestion is labeled in the interface as AI-suggested or as a simple text-matching suggestion. The fallback is not AI.
 
 Rows marked "Pending" must be filled in after running them on the deployed prototype. I have not recorded results I did not observe.
 

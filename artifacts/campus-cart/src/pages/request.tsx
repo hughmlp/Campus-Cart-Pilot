@@ -61,6 +61,7 @@ function RequestExperience() {
   const speakToken = useRef(0);
   const awaitingConfirm = useRef(false);
   const busy = useRef(false);
+  const naturalVoiceDown = useRef(false);
   const submitRef = useRef<() => void>(() => undefined);
   const draftRef = useRef<RequestDraft>(emptyDraft);
   const readAloudRef = useRef(false);
@@ -191,11 +192,18 @@ function RequestExperience() {
       // Some phones never fire the end event, so do not wait forever.
       window.setTimeout(finish, 5000 + text.length * 110);
     };
+    if (naturalVoiceDown.current) {
+      return () => { if (token !== speakToken.current) return; setSpeaking(true); browserVoice(); };
+    }
     try {
       const response = await fetch('/api/campus-cart/requests/speech', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), credentials: 'same-origin',
       });
-      if (!response.ok) throw new Error(`Speech unavailable (${response.status})`);
+      if (!response.ok) {
+        const detail: { detail?: string } | null = await response.json().catch(() => null);
+        if (response.status === 502 || response.status === 503) naturalVoiceDown.current = true;
+        throw new Error(`error ${response.status}${detail?.detail ? `: ${detail.detail}` : ''}`);
+      }
       const blob = await response.blob();
       const audio = audioEl.current ?? new Audio();
       audioEl.current = audio;
@@ -214,7 +222,7 @@ function RequestExperience() {
       return () => {
         if (token !== speakToken.current) return;
         setSpeaking(true);
-        setVoiceNote(`The natural voice isn’t available (${failure instanceof Error ? failure.message : 'unknown'}), so I’m using your device’s voice.`);
+        setVoiceNote(`The natural voice isn’t available (${failure instanceof Error ? failure.message : 'unknown'}). I’ll use your device’s voice for the rest of this session.`);
         browserVoice();
       };
     }
