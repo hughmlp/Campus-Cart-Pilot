@@ -55,6 +55,7 @@ function RequestExperience() {
   const [draftDone, setDraftDone] = useState(false);
   const [readAloud, setReadAloud] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [voiceNote, setVoiceNote] = useState('');
   const chatRef = useRef<ChatMessage[]>([]);
   const audioEl = useRef<HTMLAudioElement | null>(null);
   const speakToken = useRef(0);
@@ -161,7 +162,7 @@ function RequestExperience() {
     audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
     audio.play().catch(() => undefined);
   };
-  const speak = async (text: string, listenAfter: boolean) => {
+  const speak = async (text: string, listenAfter: boolean, browserOnly = false) => {
     if (!readAloudRef.current) return;
     const token = ++speakToken.current;
     let finished = false;
@@ -172,7 +173,7 @@ function RequestExperience() {
       if (listenAfter && readAloudRef.current && voiceStateRef.current === 'idle') toggleVoiceRef.current();
     };
     const browserVoice = () => {
-      if (!canSpeak) { finish(); return; }
+      if (!canSpeak) { setVoiceNote('This browser can’t speak out loud. Use the text below or try Safari or Chrome.'); finish(); return; }
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 1.03;
@@ -183,11 +184,12 @@ function RequestExperience() {
       window.setTimeout(finish, 3000 + text.length * 90);
     };
     setSpeaking(true);
+    if (browserOnly) { browserVoice(); return; }
     try {
       const response = await fetch('/api/campus-cart/requests/speech', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }), credentials: 'same-origin',
       });
-      if (!response.ok) throw new Error('Speech unavailable');
+      if (!response.ok) throw new Error(`Speech unavailable (${response.status})`);
       const blob = await response.blob();
       if (token !== speakToken.current) return;
       const audio = audioEl.current ?? new Audio();
@@ -196,8 +198,12 @@ function RequestExperience() {
       audio.onended = finish;
       audio.onerror = browserVoice;
       await audio.play();
-    } catch {
-      if (token === speakToken.current) browserVoice();
+      setVoiceNote('');
+    } catch (failure) {
+      if (token === speakToken.current) {
+        setVoiceNote(`The natural voice isn’t available (${failure instanceof Error ? failure.message : 'blocked'}), so I’m using your device’s voice. Check your volume and silent switch.`);
+        browserVoice();
+      }
     }
   };
   const startVoiceMode = () => {
@@ -205,7 +211,8 @@ function RequestExperience() {
     setError('');
     readAloudRef.current = true;
     setReadAloud(true);
-    speak(chatRef.current.length ? 'I’m listening.' : 'Hi! What would you like me to get?', true);
+    setVoiceNote('');
+    speak(chatRef.current.length ? 'I’m listening.' : 'Hi! What would you like me to get?', true, true);
   };
   const stopVoiceMode = () => {
     readAloudRef.current = false;
@@ -508,7 +515,7 @@ function RequestExperience() {
              <button data-testid="button-next-role" onClick={nextFromRole} disabled={saveProfile.isPending} className="btn-primary lift mt-9 w-full sm:w-auto">{saveProfile.isPending ? 'Saving…' : 'Continue'} <ArrowRight size={17}/></button>
            </div>}
            {step === 1 && <div className="page-enter"><SectionLabel>TELL US WHAT YOU NEED</SectionLabel><h2 className="display text-4xl sm:text-5xl">What can I get for you?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">Just talk or type. I’ll ask for anything I’m missing, and you’ll check everything before it’s sent.</p>
-             {config.data?.audioEnabled && (readAloud ? <div data-testid="panel-voice-mode" className="mt-7 rounded-[24px] border border-primary/30 bg-primary px-6 py-7 text-center text-primary-foreground"><p role="status" data-testid="status-voice-mode" className="display text-3xl">{voiceState === 'recording' ? 'Listening…' : voiceState === 'transcribing' ? 'Got it…' : converse.isPending ? 'Thinking…' : speaking ? 'Speaking…' : voiceState === 'starting' ? 'Starting the microphone…' : 'Your turn'}</p><p className="mt-2 text-xs text-primary-foreground/75">Talk naturally. Pause when you’re done. Say “yes” to send it at the end.</p><div className="mt-5 flex flex-wrap justify-center gap-3">{voiceState === 'idle' && !speaking && !converse.isPending && <button type="button" data-testid="button-voice-answer" onClick={toggleVoice} className="inline-flex items-center gap-2 rounded-full bg-primary-foreground px-5 py-3 text-sm font-bold text-primary"><Mic size={17}/> Tap to answer</button>}<button type="button" data-testid="button-stop-voice-mode" onClick={stopVoiceMode} className="inline-flex items-center gap-2 rounded-full border border-primary-foreground/40 px-5 py-3 text-sm font-semibold"><VolumeX size={16}/> Stop voice mode</button></div></div> : <div className="mt-7"><button type="button" data-testid="button-start-voice-order" onClick={startVoiceMode} className="btn-primary lift flex w-full items-center justify-center gap-3 !min-h-20 text-lg"><Mic size={26}/> Tap to order by voice</button><p className="mt-3 text-center text-xs leading-relaxed text-muted-foreground">I’ll ask you questions out loud and listen for your answers, so you don’t have to look at the screen.</p></div>)}
+             {config.data?.audioEnabled && (readAloud ? <div data-testid="panel-voice-mode" className="mt-7 rounded-[24px] border border-primary/30 bg-primary px-6 py-7 text-center text-primary-foreground"><p role="status" data-testid="status-voice-mode" className="display text-3xl">{voiceState === 'recording' ? 'Listening…' : voiceState === 'transcribing' ? 'Got it…' : converse.isPending ? 'Thinking…' : speaking ? 'Speaking…' : voiceState === 'starting' ? 'Starting the microphone…' : 'Your turn'}</p><p className="mt-2 text-xs text-primary-foreground/75">Talk naturally. Pause when you’re done. Say “yes” to send it at the end.</p>{voiceNote && <p data-testid="status-voice-note" className="mt-3 text-xs text-primary-foreground/90">{voiceNote}</p>}<div className="mt-5 flex flex-wrap justify-center gap-3">{voiceState === 'idle' && !speaking && !converse.isPending && <button type="button" data-testid="button-voice-answer" onClick={toggleVoice} className="inline-flex items-center gap-2 rounded-full bg-primary-foreground px-5 py-3 text-sm font-bold text-primary"><Mic size={17}/> Tap to answer</button>}<button type="button" data-testid="button-stop-voice-mode" onClick={stopVoiceMode} className="inline-flex items-center gap-2 rounded-full border border-primary-foreground/40 px-5 py-3 text-sm font-semibold"><VolumeX size={16}/> Stop voice mode</button></div></div> : <div className="mt-7"><button type="button" data-testid="button-start-voice-order" onClick={startVoiceMode} className="btn-primary lift flex w-full items-center justify-center gap-3 !min-h-20 text-lg"><Mic size={26}/> Tap to order by voice</button><p className="mt-3 text-center text-xs leading-relaxed text-muted-foreground">I’ll ask you questions out loud and listen for your answers, so you don’t have to look at the screen.</p></div>)}
              <div data-testid="chat-thread" aria-live="polite" className="mt-8 space-y-3">
                {[{ role: 'assistant' as const, content: greeting }, ...chat].map((message, index) => <div key={index} data-testid={`chat-${message.role}-${index}`} className={message.role === 'assistant' ? 'mr-auto max-w-[88%] rounded-2xl rounded-bl-sm bg-[#e8dbc2]/70 px-4 py-3 text-sm leading-relaxed' : 'ml-auto max-w-[88%] rounded-2xl rounded-br-sm bg-primary px-4 py-3 text-sm leading-relaxed text-primary-foreground'}>{message.content}</div>)}
                {converse.isPending && <div role="status" className="mr-auto max-w-[88%] rounded-2xl rounded-bl-sm bg-[#e8dbc2]/70 px-4 py-3 text-sm text-muted-foreground">Thinking…</div>}
