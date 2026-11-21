@@ -5,9 +5,9 @@ import { ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronRight, CreditCard, L
 import {
   useGetCampusCartConfig, useGetMyParticipant, useSaveMyParticipant, useCreateShoppingRequest,
   useGetMyShoppingRequest, useRecordFunnelEvent, useSubmitParticipantFeedback, useVerifyPilotInvite,
-  useStartCardSetup, useVerifyCardSetup, useGetMyCardStatus, useDisconnectMyCard,
+  useStartCardSetup, useVerifyCardSetup, useInterpretShoppingRequest, useGetMyCardStatus, useDisconnectMyCard,
   getGetMyParticipantQueryKey, getGetMyShoppingRequestQueryKey, getGetMyCardStatusQueryKey, getGetResearchDashboardQueryKey,
-  type ParticipantProfileInputRole, type ShoppingRequest,
+  type ParticipantProfileInputRole, type ShoppingRequest, type RequestSuggestion,
 } from '@workspace/api-client-react';
 import { ErrorPanel, LoadingPanel, PilotShell, SectionLabel } from '@/components/pilot-shell';
 
@@ -32,6 +32,7 @@ function RequestExperience() {
   const saveProfile = useSaveMyParticipant();
   const verifyInvite = useVerifyPilotInvite();
   const createRequest = useCreateShoppingRequest();
+  const interpret = useInterpretShoppingRequest();
   const record = useRecordFunnelEvent();
   const feedbackMutation = useSubmitParticipantFeedback();
   const startCard = useStartCardSetup();
@@ -45,6 +46,8 @@ function RequestExperience() {
   const [merchant, setMerchant] = useState('');
   const [budget, setBudget] = useState('');
   const [consent, setConsent] = useState(false);
+  const [suggestion, setSuggestion] = useState<RequestSuggestion | null>(null);
+  const [interpretedFor, setInterpretedFor] = useState('');
   const [feedback, setFeedback] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [invitationRequired, setInvitationRequired] = useState(false);
@@ -54,11 +57,16 @@ function RequestExperience() {
   const [isNewRequest, setIsNewRequest] = useState(() => new URLSearchParams(window.location.search).get('new') === '1');
   const [voiceState, setVoiceState] = useState<'idle' | 'starting' | 'recording' | 'transcribing'>('idle');
   const recorder = useRef<MediaRecorder | null>(null);
+  const monitor = useRef<{ timer: number; context: AudioContext | null } | null>(null);
+  const narrativeRef = useRef('');
+  const [level, setLevel] = useState(0);
+  const [seconds, setSeconds] = useState(0);
   const stream = useRef<MediaStream | null>(null);
   const upload = useRef<AbortController | null>(null);
   const recordingSession = useRef(0);
   const cardEventSent = useRef(false);
   const verifiedSession = useRef('');
+  narrativeRef.current = narrative;
   const request = localRequest || (isNewRequest ? null : saved.data?.request);
 
   const setNewRequestMode = (enabled: boolean) => {
@@ -90,7 +98,12 @@ function RequestExperience() {
       onError: () => setError('We could not verify the card setup. Please check your status or try again.'),
     });
   }, []);
-  const stopTracks = () => { stream.current?.getTracks().forEach(track => track.stop()); stream.current = null; };
+  const stopMonitor = () => {
+    if (monitor.current) { window.clearInterval(monitor.current.timer); monitor.current.context?.close().catch(() => undefined); monitor.current = null; }
+    setLevel(0);
+  };
+  const stopTracks = () => {
+    stopMonitor(); stream.current?.getTracks().forEach(track => track.stop()); stream.current = null; };
   const cancelVoice = () => {
     recordingSession.current++;
     upload.current?.abort();
@@ -112,6 +125,13 @@ function RequestExperience() {
     }
     stream.current?.getTracks().forEach(track => track.stop());
   }, []);
+  const runInterpret = (text: string) => {
+    setError('');
+    interpret.mutate({ data: { narrative: text } }, {
+      onSuccess: result => { applySuggestion(result, text); setStep(2); setVoiceState('idle'); },
+      onError: () => { applySuggestion(null, text); setStep(2); setVoiceState('idle'); },
+    });
+  };
   const toggleVoice = async () => {
     if (!config.data?.audioEnabled) return;
     if (voiceState === 'recording') { recorder.current?.stop(); setVoiceState('transcribing'); return; }
@@ -157,7 +177,11 @@ function RequestExperience() {
           });
           if (!response.ok) throw new Error('Transcription failed');
           const result: { text: string } = await response.json();
-          if (!controller.signal.aborted && session === recordingSession.current) setNarrative(previous => [previous.trim(), result.text.trim()].filter(Boolean).join(' ').slice(0, 240));
+          if (!controller.signal.aborted && session === recordingSession.current) {
+            const text = [narrativeRef.current.trim(), result.text.trim()].filter(Boolean).join(' ').slice(0, 240);
+            setNarrative(text);
+            runInterpret(text);
+          }
         } catch {
           if (!controller.signal.aborted && session === recordingSession.current) setError('We couldn’t transcribe that recording. Please try again or type your request.');
         } finally {
@@ -168,6 +192,27 @@ function RequestExperience() {
       recorder.current = instance;
       instance.start();
       setVoiceState('recording');
+      setSeconds(0);
+      // Stop by itself after a pause once the person has spoken, so no second tap is needed.
+      const stopNow = () => { if (instance.state !== 'inactive') { instance.stop(); setVoiceState('transcribing'); } };
+      try {
+        const context = new AudioContext();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 512;
+        context.createMediaStreamSource(media).connect(analyser);
+        const samples = new Uint8Array(analyser.fftSize);
+        let heardSpeech = false, quietSince = Date.now();
+        const startedAt = Date.now();
+        const timer = window.setInterval(() => {
+          analyser.getByteTimeDomainData(samples);
+          const rms = Math.sqrt(samples.reduce((sum, value) => sum + ((value - 128) / 128) ** 2, 0) / samples.length);
+          setLevel(Math.min(1, rms * 6));
+          setSeconds(Math.floor((Date.now() - startedAt) / 1000));
+          if (rms > 0.03) { heardSpeech = true; quietSince = Date.now(); }
+          if ((heardSpeech && Date.now() - quietSince > 1800) || Date.now() - startedAt > 45000) { stopNow(); }
+        }, 100);
+        monitor.current = { timer, context };
+      } catch { /* silence detection is optional; the person can still tap to stop */ }
     } catch {
       if (session !== recordingSession.current) return;
       stopTracks();
@@ -194,12 +239,40 @@ function RequestExperience() {
       },
     });
   };
+  const applySuggestion = (next: RequestSuggestion | null, text: string) => {
+    setSuggestion(next);
+    setInterpretedFor(next ? text : '');
+    setItem(next?.item ?? (next ? '' : text.slice(0, 240)));
+    setCategory(next?.category ?? '');
+    setMerchant(next?.merchant ?? '');
+    setBudget(next?.budgetCents != null ? (next.budgetCents / 100).toFixed(2) : '');
+  };
   const toDetails = () => {
     if (voiceState !== 'idle') { setError('Finish recording and transcription before continuing.'); return; }
-    if (!narrative.trim()) { setError('Describe what you need to continue.'); return; }
-    if (!item) setItem(narrative.trim().slice(0, 240));
-    setError(''); setStep(2);
+    const text = narrative.trim();
+    if (!text) { setError('Describe what you need to continue.'); return; }
+    if (interpret.isPending) return;
+    setError('');
+    if (suggestion && interpretedFor === text) { setStep(2); return; }
+    interpret.mutate({ data: { narrative: text } }, {
+      onSuccess: result => { applySuggestion(result, text); setStep(2); },
+      onError: () => { applySuggestion(null, text); setStep(2); },
+    });
   };
+  const clearSuggestions = () => { setItem(''); setCategory(''); setMerchant(''); setBudget(''); setSuggestion(null); setInterpretedFor(''); };
+  const sameAsSuggestion = (field: 'item' | 'category' | 'merchant' | 'budget') => {
+    if (!suggestion) return false;
+    if (field === 'budget') return suggestion.budgetCents != null && Math.round(Number(budget) * 100) === suggestion.budgetCents;
+    const suggested = suggestion[field]; const current = { item, category, merchant }[field];
+    return Boolean(suggested) && current.trim() === suggested!.trim();
+  };
+  const editedSuggestion = Boolean(suggestion) && !(['item', 'category', 'merchant', 'budget'] as const).every(field => {
+    if (field === 'budget') return suggestion!.budgetCents == null ? !budget.trim() : sameAsSuggestion('budget');
+    return suggestion![field] ? sameAsSuggestion(field) : !{ item, category, merchant }[field].trim();
+  });
+  const stillVague = Boolean(suggestion?.clarification) && sameAsSuggestion('item');
+  const sourceLabel = suggestion?.source === 'ai' ? 'AI-suggested' : suggestion?.source === 'rules' ? 'Simple text-matching suggestion' : 'Typed by you';
+  const tag = (field: 'item' | 'category' | 'merchant' | 'budget') => sameAsSuggestion(field) ? <span className="ml-2 rounded-full bg-[#e8dbc2] px-2 py-0.5 text-[10px] font-bold text-primary">Suggested</span> : null;
   const toReview = (event: FormEvent) => {
     event.preventDefault();
     const amount = Number(budget);
@@ -210,7 +283,7 @@ function RequestExperience() {
   };
   const submitRequest = () => {
     setError('');
-    createRequest.mutate({ data: { item: item.trim(), category: category.trim(), merchant: merchant.trim() || null, budgetCents: Math.round(Number(budget) * 100) } }, {
+    createRequest.mutate({ data: { item: item.trim(), category: category.trim(), merchant: merchant.trim() || null, budgetCents: Math.round(Number(budget) * 100), narrative: narrative.trim() || null, extractionSource: suggestion ? suggestion.source : 'manual', editedSuggestion } }, {
       onSuccess: data => {
         setLocalRequest(data);
         setNewRequestMode(false);
@@ -228,6 +301,8 @@ function RequestExperience() {
     setStep(0);
     setRole(profile.data?.role ?? '');
     setNarrative('');
+    setSuggestion(null);
+    setInterpretedFor('');
     setItem('');
     setCategory('');
     setMerchant('');
@@ -283,7 +358,7 @@ function RequestExperience() {
           </div>
           <div className="rounded-[26px] border border-[#c9d4c9] bg-[#e9efe6] p-6 sm:p-9"><span className="mb-6 grid size-12 place-items-center rounded-full bg-[#d3e2d3] text-[#38644a]"><CheckCircle2 size={24}/></span><SectionLabel>SUBMISSION CONFIRMED</SectionLabel><h2 data-testid="status-request-received" className="display text-4xl sm:text-5xl">Request received—no order placed.</h2><p className="mt-4 max-w-xl text-sm leading-relaxed text-[#536b5a]">Thank you. We recorded your request for this research pilot. This is not an order confirmation and no payment has been taken.</p></div>
           {request.supportStatus === 'unsupported' && <div data-testid="status-unsupported-merchant" className="rounded-2xl border border-[#dbbc7d] bg-[#f7ecd2] p-5 text-sm font-semibold text-[#745823]">We can’t purchase from this merchant yet. Your request has been recorded.</div>}
-          <div className="rounded-[26px] border border-border bg-card p-6 sm:p-8"><div className="flex items-center justify-between gap-3"><h3 className="display text-2xl">Your recorded request</h3><span className="mono text-[9px] text-muted-foreground">REQUEST ONLY</span></div><div className="mt-6 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">{[['Item', request.item], ['Category', request.category], ['Preferred merchant', request.merchant || 'Not specified'], ['Maximum total, including taxes & fees', money(request.budgetCents)]].map(([label, value]) => <div key={label}><span className="text-xs text-muted-foreground">{label}</span><p data-testid={`text-request-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`} className="mt-1 font-semibold">{value}</p></div>)}</div></div>
+          <div className="rounded-[26px] border border-border bg-card p-6 sm:p-8"><div className="flex items-center justify-between gap-3"><h3 className="display text-2xl">Your recorded request</h3><span className="mono text-[9px] text-muted-foreground">REQUEST ONLY</span></div><div className="mt-6 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">{[...(request.narrative ? [['Your words', `“${request.narrative}”`]] : []), ['Item', request.item], ['Category', request.category], ['Preferred merchant', request.merchant || 'Not specified'], ['Maximum total, including taxes & fees', money(request.budgetCents)]].map(([label, value]) => <div key={label}><span className="text-xs text-muted-foreground">{label}</span><p data-testid={`text-request-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`} className="mt-1 font-semibold">{value}</p></div>)}</div></div>
           <div className="rounded-[26px] border border-border bg-card p-6 sm:p-8"><div className="mb-5 flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-[#e8dbc2] text-primary"><CreditCard size={20}/></span><div><h3 className="font-bold">Optional card setup</h3><p className="text-xs text-muted-foreground">Separate from your recorded request</p></div></div>
             <p className="text-sm leading-relaxed text-muted-foreground">{disclosure}</p>
             {card.data?.status === 'connected' ? <div className="mt-6 flex flex-wrap items-center gap-4"><span data-testid="status-card-connected" className="flex items-center gap-2 text-sm font-bold text-[#38644a]"><ShieldCheck size={18}/> Test-mode card connected</span><button data-testid="button-disconnect-card" className="text-sm font-semibold text-destructive underline underline-offset-4" disabled={disconnect.isPending} onClick={removeCard}>{disconnect.isPending ? 'Disconnecting…' : 'Disconnect card'}</button></div> : <><label className="mt-6 flex cursor-pointer items-start gap-3 rounded-2xl border border-border bg-background p-4 text-sm leading-relaxed"><input data-testid="checkbox-stripe-consent" type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} className="mt-1 size-4 accent-[#173657]"/><span>I understand the Stripe test-mode card disclosure above and explicitly consent to starting card setup.</span></label><button data-testid="button-start-card-setup" disabled={!consent || !config.data?.cardSetupEnabled || startCard.isPending} onClick={beginCard} className="btn-primary lift mt-4 w-full sm:w-auto">{startCard.isPending ? 'Opening Stripe…' : 'Continue to Stripe test mode'} <ArrowRight size={16}/></button>{!config.data?.cardSetupEnabled && <p data-testid="status-card-unavailable" className="mt-3 text-xs text-muted-foreground">Card setup is currently unavailable for this pilot. Your request has still been recorded; no card is needed.</p>}{card.data?.status === 'setup_pending' && <p data-testid="status-card-pending" className="mt-3 text-xs text-muted-foreground">Your card setup is pending verification. No purchase was made.</p>}</>}
@@ -310,9 +385,9 @@ function RequestExperience() {
              </form>}
              <button data-testid="button-next-role" onClick={nextFromRole} disabled={saveProfile.isPending} className="btn-primary lift mt-9 w-full sm:w-auto">{saveProfile.isPending ? 'Saving…' : 'Continue'} <ArrowRight size={17}/></button>
            </div>}
-           {step === 1 && <div className="page-enter"><SectionLabel>PUT IT IN YOUR OWN WORDS</SectionLabel><h2 className="display text-4xl sm:text-5xl">What are you looking for?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">A sentence is enough. You’ll shape the details on the next screen.</p><textarea data-testid="input-request-narrative" value={narrative} onChange={e => setNarrative(e.target.value)} className="field mt-7 min-h-[180px] resize-y !p-5 text-lg" placeholder="I’m looking for…" maxLength={240}/><div className="mt-4 flex items-center justify-between gap-4"><button data-testid="button-voice-input" type="button" disabled={!config.data?.audioEnabled || voiceState === 'starting' || voiceState === 'transcribing'} onClick={toggleVoice} className="btn-outline lift !min-h-11 !px-4 text-xs"><Mic size={16}/>{!config.data?.audioEnabled ? 'Voice unavailable' : voiceState === 'recording' ? 'Stop recording' : voiceState === 'transcribing' ? 'Transcribing…' : voiceState === 'starting' ? 'Starting…' : 'Speak instead'}</button><span role="status" className="text-right text-xs text-muted-foreground">{!config.data?.audioEnabled ? 'Audio is not enabled for this pilot.' : voiceState === 'recording' ? 'Recording… stop when you’re done.' : voiceState === 'transcribing' ? 'Turning your recording into editable text…' : 'Or type above'}</span></div>{config.data?.audioEnabled && <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Your recording is used only to create editable text and is deleted immediately after transcription, including if transcription fails.</p>}<div className="mt-9 flex items-center justify-between gap-3"><button data-testid="button-back-role" onClick={() => { cancelVoice(); setError(''); setStep(0); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-next-request" onClick={toDetails} disabled={voiceState !== 'idle'} className="btn-primary lift">Continue <ArrowRight size={17}/></button></div></div>}
-          {step === 2 && <form onSubmit={toReview} className="page-enter"><SectionLabel>MAKE IT SPECIFIC</SectionLabel><h2 className="display text-4xl sm:text-5xl">The details matter.</h2><p className="mt-4 text-sm text-muted-foreground">Nothing is bought here. These fields make your request useful for research.</p><div className="mt-8 space-y-5"><div><label htmlFor="item" className="label">Item you need <span className="text-destructive">*</span></label><input id="item" data-testid="input-item" className="field" value={item} onChange={e => setItem(e.target.value)} maxLength={240} placeholder="Describe the item"/></div><div><label htmlFor="category" className="label">Category <span className="text-destructive">*</span></label><input id="category" data-testid="input-category" className="field" value={category} onChange={e => setCategory(e.target.value)} maxLength={80} placeholder="What kind of item is it?"/></div><div><label htmlFor="merchant" className="label">Preferred merchant <span className="font-normal text-muted-foreground">· optional</span></label><input id="merchant" data-testid="input-merchant" className="field" value={merchant} onChange={e => setMerchant(e.target.value)} maxLength={160} placeholder="Leave blank if you’re flexible"/>{merchant.trim() && !supported && <p data-testid="status-merchant-unsupported-preview" className="mt-2 text-xs text-[#8a662d]">We can’t purchase from this merchant yet. Your request has been recorded only after you submit it.</p>}</div><div><label htmlFor="budget" className="label">Maximum total budget <span className="text-destructive">*</span></label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">$</span><input id="budget" data-testid="input-budget" inputMode="decimal" className="field !pl-8" value={budget} onChange={e => setBudget(e.target.value)} placeholder="0.00"/></div><p className="mt-2 text-xs text-muted-foreground">The maximum total you would spend, including taxes and fees. This is not a price quote.</p></div></div><div className="mt-9 flex items-center justify-between gap-3"><button type="button" data-testid="button-back-request" onClick={() => { setError(''); setStep(1); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-review-request" className="btn-primary lift">Review request <ArrowRight size={17}/></button></div></form>}
-          {step === 3 && <div className="page-enter"><SectionLabel>CHECK BEFORE YOU SEND</SectionLabel><h2 className="display text-4xl sm:text-5xl">Does this look right?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">You are submitting a research request, not placing an order.</p><div className="mt-8 divide-y divide-border rounded-2xl border border-border bg-background px-5">{[['Item', item], ['Category', category], ['Preferred merchant', merchant || 'No preference'], ['Maximum total including taxes and fees', money(Math.round(Number(budget) * 100))]].map(([label, value]) => <div key={label} className="flex justify-between gap-4 py-4 text-sm"><span className="text-muted-foreground">{label}</span><strong className="max-w-[55%] text-right font-semibold break-words">{value}</strong></div>)}</div><div className="mt-5 flex gap-3 rounded-xl bg-[#f4e8d0] p-4 text-xs leading-relaxed text-[#75582d]"><LockKeyhole size={18} className="shrink-0"/><span>TEST MODE. Submitting records your request for research. No purchase, order, or charge will occur.</span></div><div className="mt-9 flex items-center justify-between gap-3"><button data-testid="button-edit-request" onClick={() => { setError(''); setStep(2); }} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground"><PenLine size={16}/>Edit details</button><button data-testid="button-submit-request" disabled={createRequest.isPending} onClick={submitRequest} className="btn-primary lift">{createRequest.isPending ? 'Recording…' : 'Submit request'} <ChevronRight size={17}/></button></div></div>}
+           {step === 1 && <div className="page-enter"><SectionLabel>PUT IT IN YOUR OWN WORDS</SectionLabel><h2 className="display text-4xl sm:text-5xl">What are you looking for?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">A sentence is enough. Name the item, and add a budget or store if you know them, like “running socks under $30 from the bookstore.” We’ll suggest the details on the next screen and you can change anything.</p>{config.data?.audioEnabled && <div className="mt-8 flex flex-col items-center rounded-[24px] border border-border bg-background px-5 py-8 text-center"><button data-testid="button-voice-input" type="button" aria-label={voiceState === 'recording' ? 'Stop recording' : 'Start recording'} disabled={voiceState === 'starting' || voiceState === 'transcribing' || interpret.isPending} onClick={toggleVoice} className={`relative grid size-24 place-items-center rounded-full text-primary-foreground shadow-lg transition-transform active:scale-95 disabled:opacity-60 ${voiceState === 'recording' ? 'bg-destructive' : 'bg-primary'}`}>{voiceState === 'recording' && <span aria-hidden className="absolute inset-0 rounded-full bg-destructive/40" style={{ transform: `scale(${1 + level * 0.6})`, transition: 'transform 100ms' }}/>}<span className="relative">{voiceState === 'recording' ? <span className="block size-7 rounded-md bg-primary-foreground"/> : <Mic size={34}/>}</span></button><p role="status" data-testid="status-voice" className="mt-5 text-base font-semibold">{voiceState === 'starting' ? 'Starting the microphone…' : voiceState === 'recording' ? `Listening… ${seconds}s` : voiceState === 'transcribing' ? 'Writing down what you said…' : interpret.isPending ? 'Finding the details…' : 'Tap and say what you need'}</p><p className="mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground">{voiceState === 'recording' ? 'Pause when you’re done and it stops by itself, or tap to finish.' : 'Try: “running socks under thirty dollars from the bookstore.” You’ll check the details before anything is recorded.'}</p></div>}<div className="mt-6"><label htmlFor="narrative" className="label">{config.data?.audioEnabled ? 'Or type it' : 'Type it'}</label><textarea id="narrative" data-testid="input-request-narrative" value={narrative} onChange={e => setNarrative(e.target.value)} className="field mt-2 min-h-[120px] resize-y !p-5 text-lg" placeholder="I’m looking for…" maxLength={240}/></div>{!config.data?.audioEnabled && <p className="mt-3 text-xs text-muted-foreground">Voice input is not enabled for this pilot.</p>}{config.data?.audioEnabled && <p className="mt-3 text-xs leading-relaxed text-muted-foreground">Your recording is used only to create editable text and is deleted immediately after transcription, including if transcription fails.</p>}<div className="mt-9 flex items-center justify-between gap-3"><button data-testid="button-back-role" onClick={() => { cancelVoice(); setError(''); setStep(0); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-next-request" onClick={toDetails} disabled={voiceState !== 'idle' || interpret.isPending} className="btn-primary lift">{interpret.isPending ? 'Reading your request…' : 'Continue'} <ArrowRight size={17}/></button></div></div>}
+          {step === 2 && <form onSubmit={toReview} className="page-enter"><SectionLabel>MAKE IT SPECIFIC</SectionLabel><h2 className="display text-4xl sm:text-5xl">The details matter.</h2><p className="mt-4 text-sm text-muted-foreground">Nothing is bought here. These fields make your request useful for research.</p>{narrative.trim() && <div data-testid="panel-your-words" className="mt-6 rounded-2xl border border-border bg-background p-5"><span className="mono text-[9px] font-bold text-muted-foreground">YOUR WORDS</span><p className="mt-2 text-sm font-semibold leading-relaxed">“{narrative.trim()}”</p><p data-testid="text-suggestion-source" className="mt-3 text-xs leading-relaxed text-muted-foreground">{suggestion ? `${sourceLabel}. Check every field below: you can edit anything, and nothing is recorded until you submit.` : 'We couldn’t suggest details this time, so please fill them in yourself.'}</p><button type="button" data-testid="button-edit-words" onClick={() => { setError(''); setStep(1); }} className="mt-3 mr-5 text-xs font-semibold text-primary underline underline-offset-4">Edit my words</button>{suggestion && <button type="button" data-testid="button-clear-suggestions" onClick={clearSuggestions} className="mt-3 text-xs font-semibold text-destructive underline underline-offset-4">Reject suggestions and start blank</button>}</div>}{stillVague && <div role="status" data-testid="status-clarification" className="mt-4 rounded-2xl border border-[#dbbc7d] bg-[#f7ecd2] p-4 text-sm leading-relaxed text-[#745823]"><strong>One question:</strong> {suggestion!.clarification}</div>}<div className="mt-8 space-y-5"><div><label htmlFor="item" className="label">Item you need <span className="text-destructive">*</span>{tag('item')}</label><input id="item" data-testid="input-item" className="field" value={item} onChange={e => setItem(e.target.value)} maxLength={240} placeholder="Describe the item"/></div><div><label htmlFor="category" className="label">Category <span className="text-destructive">*</span>{tag('category')}</label><input id="category" data-testid="input-category" className="field" value={category} onChange={e => setCategory(e.target.value)} maxLength={80} placeholder="What kind of item is it?"/></div><div><label htmlFor="merchant" className="label">Preferred merchant <span className="font-normal text-muted-foreground">· optional</span>{tag('merchant')}</label><input id="merchant" data-testid="input-merchant" className="field" value={merchant} onChange={e => setMerchant(e.target.value)} maxLength={160} placeholder="Leave blank if you’re flexible"/>{merchant.trim() && !supported && <p data-testid="status-merchant-unsupported-preview" className="mt-2 text-xs text-[#8a662d]">We can’t purchase from this merchant yet. Your request has been recorded only after you submit it.</p>}</div><div><label htmlFor="budget" className="label">Maximum total budget <span className="text-destructive">*</span>{tag('budget')}</label><div className="relative"><span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">$</span><input id="budget" data-testid="input-budget" inputMode="decimal" className="field !pl-8" value={budget} onChange={e => setBudget(e.target.value)} placeholder="0.00"/></div><p className="mt-2 text-xs text-muted-foreground">The maximum total you would spend, including taxes and fees. This is not a price quote.{suggestion && suggestion.budgetCents == null && !budget.trim() ? ' We didn’t see a budget in your sentence, so it’s blank.' : ''}</p></div></div><div className="mt-9 flex items-center justify-between gap-3"><button type="button" data-testid="button-back-request" onClick={() => { setError(''); setStep(1); }} className="text-sm font-semibold text-muted-foreground"><ArrowLeft size={16} className="mr-2 inline"/>Back</button><button data-testid="button-review-request" className="btn-primary lift">Review request <ArrowRight size={17}/></button></div></form>}
+          {step === 3 && <div className="page-enter"><SectionLabel>CHECK BEFORE YOU SEND</SectionLabel><h2 className="display text-4xl sm:text-5xl">Does this look right?</h2><p className="mt-4 text-sm leading-relaxed text-muted-foreground">You are submitting a research request, not placing an order.</p><div className="mt-8 divide-y divide-border rounded-2xl border border-border bg-background px-5">{[...(narrative.trim() ? [['Your words', `“${narrative.trim()}”`]] : []), ['Item', item], ['Category', category], ['Preferred merchant', merchant || 'No preference'], ['Maximum total including taxes and fees', money(Math.round(Number(budget) * 100))], ['Details filled by', suggestion ? `${sourceLabel}${editedSuggestion ? ', edited by you' : ', confirmed by you'}` : 'You']].map(([label, value]) => <div key={label} className="flex justify-between gap-4 py-4 text-sm"><span className="text-muted-foreground">{label}</span><strong className="max-w-[55%] text-right font-semibold break-words">{value}</strong></div>)}</div><div className="mt-5 flex gap-3 rounded-xl bg-[#f4e8d0] p-4 text-xs leading-relaxed text-[#75582d]"><LockKeyhole size={18} className="shrink-0"/><span>TEST MODE. Submitting records your request for research. No purchase, order, or charge will occur.</span></div><div className="mt-9 flex items-center justify-between gap-3"><button data-testid="button-edit-request" onClick={() => { setError(''); setStep(2); }} className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground"><PenLine size={16}/>Edit details</button><button data-testid="button-submit-request" disabled={createRequest.isPending} onClick={submitRequest} className="btn-primary lift">{createRequest.isPending ? 'Recording…' : 'Submit request'} <ChevronRight size={17}/></button></div></div>}
         </div>}
       </VerifiedEmailGate>
     </div>

@@ -16,6 +16,11 @@ export interface ShoppingRequest {
   /** @nullable */
   merchant: string | null;
   budgetCents: number;
+  /** @nullable */
+  narrative?: string | null;
+  /** @nullable */
+  extractionSource?: string | null;
+  editedSuggestion?: boolean;
   supportStatus: ShoppingRequestSupportStatus;
   status: ShoppingRequestStatus;
   createdAt: Date;

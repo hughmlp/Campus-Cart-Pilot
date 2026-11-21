@@ -87,13 +87,18 @@ export const createShoppingRequestBodyMerchantMax = 160;
 
 export const createShoppingRequestBodyBudgetCentsMax = 100000000;
 
+export const createShoppingRequestBodyNarrativeMax = 240;
+
 
 
 export const CreateShoppingRequestBody = zod.object({
   "item": zod.string().min(1).max(createShoppingRequestBodyItemMax),
   "category": zod.string().min(1).max(createShoppingRequestBodyCategoryMax),
   "merchant": zod.string().max(createShoppingRequestBodyMerchantMax).nullable(),
-  "budgetCents": zod.number().int().min(1).max(createShoppingRequestBodyBudgetCentsMax)
+  "budgetCents": zod.number().int().min(1).max(createShoppingRequestBodyBudgetCentsMax),
+  "narrative": zod.string().max(createShoppingRequestBodyNarrativeMax).nullish(),
+  "extractionSource": zod.union([zod.literal('ai'),zod.literal('rules'),zod.literal('manual'),zod.literal(null)]).nullish(),
+  "editedSuggestion": zod.boolean().optional()
 })
 
 export const CreateShoppingRequestResponse = zod.object({
@@ -103,6 +108,9 @@ export const CreateShoppingRequestResponse = zod.object({
   "category": zod.string(),
   "merchant": zod.string().nullable(),
   "budgetCents": zod.number().int(),
+  "narrative": zod.string().nullish(),
+  "extractionSource": zod.string().nullish(),
+  "editedSuggestion": zod.boolean().optional(),
   "supportStatus": zod.enum(['supported', 'unsupported', 'unspecified']),
   "status": zod.enum(['received']),
   "createdAt": zod.coerce.date()
@@ -119,6 +127,38 @@ export const TranscribeShoppingRequestResponse = zod.object({
 
 
 /**
+ * Reads one short sentence and returns suggested item, category, merchant and budget for the participant to check and edit. Nothing is saved and no order is placed. Fields not stated in the sentence are returned as null, and a clarification question is returned when the item is too vague to act on.
+ * @summary Suggest structured fields from a participant's own words, without recording anything
+ */
+export const interpretShoppingRequestBodyNarrativeMax = 240;
+
+
+
+export const InterpretShoppingRequestBody = zod.object({
+  "narrative": zod.string().min(1).max(interpretShoppingRequestBodyNarrativeMax)
+})
+
+export const interpretShoppingRequestResponseItemMax = 240;
+
+export const interpretShoppingRequestResponseCategoryMax = 80;
+
+export const interpretShoppingRequestResponseMerchantMax = 160;
+
+export const interpretShoppingRequestResponseClarificationMax = 300;
+
+
+
+export const InterpretShoppingRequestResponse = zod.object({
+  "item": zod.string().max(interpretShoppingRequestResponseItemMax).nullable(),
+  "category": zod.string().max(interpretShoppingRequestResponseCategoryMax).nullable(),
+  "merchant": zod.string().max(interpretShoppingRequestResponseMerchantMax).nullable(),
+  "budgetCents": zod.number().int().nullable(),
+  "clarification": zod.string().max(interpretShoppingRequestResponseClarificationMax).nullable(),
+  "source": zod.enum(['ai', 'rules'])
+})
+
+
+/**
  * @summary Get the signed-in participant's latest request
  */
 export const GetMyShoppingRequestResponse = zod.object({
@@ -129,6 +169,9 @@ export const GetMyShoppingRequestResponse = zod.object({
   "category": zod.string(),
   "merchant": zod.string().nullable(),
   "budgetCents": zod.number().int(),
+  "narrative": zod.string().nullish(),
+  "extractionSource": zod.string().nullish(),
+  "editedSuggestion": zod.boolean().optional(),
   "supportStatus": zod.enum(['supported', 'unsupported', 'unspecified']),
   "status": zod.enum(['received']),
   "createdAt": zod.coerce.date()
@@ -233,6 +276,9 @@ export const GetResearchDashboardResponse = zod.object({
   "category": zod.string().nullable(),
   "merchant": zod.string().nullable(),
   "budgetCents": zod.number().int().nullable(),
+  "narrative": zod.string().nullable(),
+  "extractionSource": zod.string().nullable(),
+  "editedSuggestion": zod.boolean().nullable(),
   "cardStepViews": zod.number().int(),
   "setupStarts": zod.number().int(),
   "setupCompletions": zod.number().int(),

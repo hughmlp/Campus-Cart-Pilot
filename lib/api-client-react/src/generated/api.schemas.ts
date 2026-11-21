@@ -26,6 +26,48 @@ export interface CampusCartConfig {
 
 export type RequestAudio = Blob;
 
+export interface InterpretRequestInput {
+  /**
+     * @minLength 1
+     * @maxLength 240
+     */
+  narrative: string;
+}
+
+export type RequestSuggestionSource = typeof RequestSuggestionSource[keyof typeof RequestSuggestionSource];
+
+
+export const RequestSuggestionSource = {
+  ai: 'ai',
+  rules: 'rules',
+} as const;
+
+export interface RequestSuggestion {
+  /**
+     * @maxLength 240
+     * @nullable
+     */
+  item: string | null;
+  /**
+     * @maxLength 80
+     * @nullable
+     */
+  category: string | null;
+  /**
+     * @maxLength 160
+     * @nullable
+     */
+  merchant: string | null;
+  /** @nullable */
+  budgetCents: number | null;
+  /**
+     * @maxLength 300
+     * @nullable
+     */
+  clarification: string | null;
+  source: RequestSuggestionSource;
+}
+
 export interface RequestTranscript {
   text: string;
 }
@@ -85,6 +127,18 @@ export interface ParticipantProfile {
   cardStatus: ParticipantProfileCardStatus;
 }
 
+/**
+ * @nullable
+ */
+export type ShoppingRequestInputExtractionSource = typeof ShoppingRequestInputExtractionSource[keyof typeof ShoppingRequestInputExtractionSource] | null;
+
+
+export const ShoppingRequestInputExtractionSource = {
+  ai: 'ai',
+  rules: 'rules',
+  manual: 'manual',
+} as const;
+
 export interface ShoppingRequestInput {
   /**
      * @minLength 1
@@ -106,6 +160,14 @@ export interface ShoppingRequestInput {
      * @maximum 100000000
      */
   budgetCents: number;
+  /**
+     * @maxLength 240
+     * @nullable
+     */
+  narrative?: string | null;
+  /** @nullable */
+  extractionSource?: ShoppingRequestInputExtractionSource;
+  editedSuggestion?: boolean;
 }
 
 export type ShoppingRequestSupportStatus = typeof ShoppingRequestSupportStatus[keyof typeof ShoppingRequestSupportStatus];
@@ -132,6 +194,11 @@ export interface ShoppingRequest {
   /** @nullable */
   merchant: string | null;
   budgetCents: number;
+  /** @nullable */
+  narrative?: string | null;
+  /** @nullable */
+  extractionSource?: string | null;
+  editedSuggestion?: boolean;
   supportStatus: ShoppingRequestSupportStatus;
   status: ShoppingRequestStatus;
   createdAt: string;
@@ -223,6 +290,12 @@ export interface ResearchParticipant {
   merchant: string | null;
   /** @nullable */
   budgetCents: number | null;
+  /** @nullable */
+  narrative: string | null;
+  /** @nullable */
+  extractionSource: string | null;
+  /** @nullable */
+  editedSuggestion: boolean | null;
   cardStepViews: number;
   setupStarts: number;
   setupCompletions: number;

@@ -157,6 +157,29 @@ paths:
           description: Unsupported audio format
         "503":
           description: Transcription unavailable
+  /campus-cart/requests/interpret:
+    post:
+      operationId: interpretShoppingRequest
+      tags: [campus-cart]
+      summary: Suggest structured fields from a participant's own words, without recording anything
+      description: Reads one short sentence and returns suggested item, category, merchant and budget for the participant to check and edit. Nothing is saved and no order is placed. Fields not stated in the sentence are returned as null, and a clarification question is returned when the item is too vague to act on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InterpretRequestInput"
+      responses:
+        "200":
+          description: Suggested fields for the participant to review
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestSuggestion"
+        "400":
+          description: Empty or invalid sentence
+        "401":
+          description: Participant profile required
   /campus-cart/participants/me/request:
     get:
       operationId: getMyShoppingRequest
@@ -331,6 +354,21 @@ components:
     RequestAudio:
       type: string
       format: binary
+    InterpretRequestInput:
+      type: object
+      properties:
+        narrative: { type: string, minLength: 1, maxLength: 240 }
+      required: [narrative]
+    RequestSuggestion:
+      type: object
+      properties:
+        item: { type: ["string", "null"], maxLength: 240 }
+        category: { type: ["string", "null"], maxLength: 80 }
+        merchant: { type: ["string", "null"], maxLength: 160 }
+        budgetCents: { type: ["integer", "null"] }
+        clarification: { type: ["string", "null"], maxLength: 300 }
+        source: { type: string, enum: [ai, rules] }
+      required: [item, category, merchant, budgetCents, clarification, source]
     RequestTranscript:
       type: object
       properties:
@@ -371,6 +409,9 @@ components:
         category: { type: string, minLength: 1, maxLength: 80 }
         merchant: { type: ["string", "null"], maxLength: 160 }
         budgetCents: { type: integer, minimum: 1, maximum: 100000000 }
+        narrative: { type: ["string", "null"], maxLength: 240 }
+        extractionSource: { type: ["string", "null"], enum: [ai, rules, manual, null] }
+        editedSuggestion: { type: boolean }
       required: [item, category, merchant, budgetCents]
     ShoppingRequest:
       type: object
@@ -381,6 +422,9 @@ components:
         category: { type: string }
         merchant: { type: ["string", "null"] }
         budgetCents: { type: integer }
+        narrative: { type: ["string", "null"] }
+        extractionSource: { type: ["string", "null"] }
+        editedSuggestion: { type: boolean }
         supportStatus: { type: string, enum: [supported, unsupported, unspecified] }
         status: { type: string, enum: [received] }
         createdAt: { type: string, format: date-time }
@@ -439,12 +483,15 @@ components:
         category: { type: ["string", "null"] }
         merchant: { type: ["string", "null"] }
         budgetCents: { type: ["integer", "null"] }
+        narrative: { type: ["string", "null"] }
+        extractionSource: { type: ["string", "null"] }
+        editedSuggestion: { type: ["boolean", "null"] }
         cardStepViews: { type: integer }
         setupStarts: { type: integer }
         setupCompletions: { type: integer }
         abandoned: { type: boolean }
         feedback: { type: ["string", "null"] }
-      required: [participantId, role, item, category, merchant, budgetCents, cardStepViews, setupStarts, setupCompletions, abandoned, feedback]
+      required: [participantId, role, item, category, merchant, budgetCents, narrative, extractionSource, editedSuggestion, cardStepViews, setupStarts, setupCompletions, abandoned, feedback]
     ResearchDashboard:
       type: object
       properties:
