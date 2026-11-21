@@ -91,7 +91,6 @@ router.post("/campus-cart/requests/transcription", async (req, res, next): Promi
       model,
       file: createReadStream(path),
       language: "en",
-      prompt: "A student says what they want to buy: an item, sometimes a store and a maximum price in dollars. Example: running socks under thirty dollars from the bookstore.",
     });
     const primary = process.env.AI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
     // Prefer the more accurate model; fall back to the smaller one so voice keeps working if it is unavailable.
@@ -171,6 +170,7 @@ async function converseWithModel(messages: { role: "user" | "assistant"; content
         "Your job is to collect: a specific item, a maximum total budget in dollars, and optionally a preferred store. Infer the category yourself and never ask for it.",
         "Ask for ONE missing thing at a time, in one short, warm, plain sentence. Order: specific item (only if it is very general, like 'something for a cold'), then budget, then store.",
         "Keep every reply under 20 words, because it is spoken aloud. When asking about a store, do not list store names; just ask if they have one in mind or no preference. Never ask about the item again if the participant has already named a concrete product.",
+        "Accept any store the participant names, even one that is not in the supported list. The app tells them separately whether it can buy there.",
         "Never guess a budget, store or brand the participant did not say. If they say they have no store preference, set merchant_answered to true and merchant to null.",
         "If the participant corrects a detail they already gave (for example a different budget), update it.",
         "When item, budget and the store question are all settled, set done to true and reply with a one-sentence confirmation that tells them to check the details and send it.",
