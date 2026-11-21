@@ -36,8 +36,8 @@ The future AI system is a purchasing agent that discovers a merchant, uses its w
 | Request form, review, recording and status screens | Working |
 | Merchant support check ("We can't purchase from this merchant yet") | Working |
 | Card setup through Stripe, test mode | Working, test mode only |
-| Voice transcription | Working. Speech is transcribed on the server, the raw audio is deleted afterward, and the text stays editable. |
-| Extracting item, category, merchant and budget from a spoken or typed request | Working. A language model suggests the fields from the user's sentence when the AI integration is configured. If it is not, a labeled text-matching fallback (not AI) is used. The user can edit or reject every suggestion. |
+| Voice ordering | Working. The first screen is voice-first: tap the microphone, say the request, and it stops by itself after a pause. The server transcribes it (`gpt-4o-transcribe`, with `gpt-4o-mini-transcribe` as a fallback), deletes the raw audio, and the same sentence goes straight into the AI intake step, so the user lands on suggested details without typing. The words stay editable by going back. |
+| Extracting item, category, merchant and budget from a spoken or typed request | Working. A language model (`gpt-4.1` by default) suggests the fields from the user's sentence when the AI integration is configured. If it is not, a labeled text-matching fallback (not AI) is used. The user can edit or reject every suggestion. |
 | Purchasing agent that discovers, checks out and pays | Not built, disabled by design |
 
 ## Test results

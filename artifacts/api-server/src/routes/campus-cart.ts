@@ -86,9 +86,17 @@ router.post("/campus-cart/requests/transcription", async (req, res, next): Promi
     await writeFile(path, req.body, { mode: 0o600 });
     req.body = undefined;
     const client = new OpenAI(transcriptionSettings()!);
-    const result = await client.audio.transcriptions.create({
-      model: "gpt-4o-mini-transcribe",
+    const transcribe = (model: string) => client.audio.transcriptions.create({
+      model,
       file: createReadStream(path),
+      language: "en",
+      prompt: "A student says what they want to buy: an item, sometimes a store and a maximum price in dollars. Example: running socks under thirty dollars from the bookstore.",
+    });
+    const primary = process.env.AI_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
+    // Prefer the more accurate model; fall back to the smaller one so voice keeps working if it is unavailable.
+    const result = await transcribe(primary).catch((error) => {
+      req.log.warn({ err: error, model: primary }, "Primary transcription model failed; retrying with fallback");
+      return transcribe("gpt-4o-mini-transcribe");
     });
     const text = result.text.trim();
     if (!text) { res.status(422).json({ error: "No speech detected; type your request instead" }); return; }
@@ -107,7 +115,7 @@ async function suggestWithModel(narrative: string, merchants: string[]): Promise
   if (!settings) return null;
   const client = new OpenAI(settings);
   const result = await client.chat.completions.create({
-    model: process.env.AI_INTAKE_MODEL || "gpt-4.1-mini",
+    model: process.env.AI_INTAKE_MODEL || "gpt-4.1",
     temperature: 0,
     max_tokens: 300,
     response_format: { type: "json_object" },
