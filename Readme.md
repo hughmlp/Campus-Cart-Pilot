@@ -61,7 +61,7 @@ The future AI system is a purchasing agent that discovers a merchant, uses its w
 
 ## Demo Video
 
-Link to the draft demo on Google Drive: TODO add link (viewing access for Emelia Hughes and Samuel Huang).
+[Watch the draft demo on Google Drive](https://drive.google.com/file/d/1pcAK1I85Vy_KT-uC1hneM97KNGueZ71A/view?usp=sharing). Viewing access is shared with Emelia Hughes and Samuel Huang.
 
 ## Secrets
 
