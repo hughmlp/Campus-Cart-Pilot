@@ -24,3 +24,5 @@ Task: hold a short conversation that collects the item, a maximum budget and an 
 A user test of the first version said choosing a category, store and budget in separate fields was too much work, so I replaced the form with a conversation. I kept the server in charge of deciding when the draft is complete, because I did not want the model to be able to skip the budget or invent one.
 
 Testing on my own devices showed a bug I introduced: I gave the speech-to-text model an example sentence as a hint, and on a laptop microphone it sometimes copied that sentence or returned "running socks" instead of what I said. I removed the hint. I only found this because I tested with real speech on a second device, which is a check AI-generated code does not do for you.
+
+A second bug showed up when I repeated the cold-medicine test: the model's record of the item was empty while its replies carried on as if it knew the item, so the assistant restarted at the end. I would not have found it from the code or from one test. I fixed it by making the server keep the item and ask the budget and store questions itself, and I still need to retest it.

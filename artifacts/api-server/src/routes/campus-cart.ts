@@ -92,7 +92,7 @@ router.post("/campus-cart/requests/transcription", async (req, res, next): Promi
       file: createReadStream(path),
       language: "en",
     });
-    const primary = process.env.AI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
+    const primary = process.env.AI_TRANSCRIBE_MODEL || "gpt-4o-transcribe";
     // Prefer the more accurate model; fall back to the smaller one so voice keeps working if it is unavailable.
     const result = await transcribe(primary).catch((error) => {
       req.log.warn({ err: error, model: primary }, "Primary transcription model failed; retrying with fallback");
@@ -172,6 +172,8 @@ async function converseWithModel(messages: { role: "user" | "assistant"; content
         "Keep every reply under 20 words, because it is spoken aloud. When asking about a store, do not list store names; just ask if they have one in mind or no preference. Never ask about the item again if the participant has already named a concrete product.",
         "Accept any store the participant names, even one that is not in the supported list. The app tells them separately whether it can buy there.",
         "Never guess a budget, store or brand the participant did not say. If they say they have no store preference, set merchant_answered to true and merchant to null.",
+        "If the participant asks you to choose for them (for example 'you tell me'), pick a sensible, specific default yourself, such as 'cold and flu medicine', put it in item, and move on to the next question.",
+        "Once the participant has described anything at all, item must never be null again: keep the best description so far.",
         "If the participant corrects a detail they already gave (for example a different budget), update it.",
         "When item, budget and the store question are all settled, set done to true and reply with a one-sentence confirmation that tells them to check the details and send it.",
         'Return JSON: {"item": string|null, "category": string|null, "merchant": string|null, "budget_dollars": number|null, "merchant_answered": boolean, "done": boolean, "reply": string}.',
@@ -185,9 +187,11 @@ async function converseWithModel(messages: { role: "user" | "assistant"; content
   const dollars = typeof raw.budget_dollars === "number" && Number.isFinite(raw.budget_dollars) && raw.budget_dollars > 0 && raw.budget_dollars <= 1000000 ? raw.budget_dollars : null;
   // Only accept a budget if the participant actually said a number somewhere.
   const budgetCents = dollars !== null && userText.some(mentionsNumber) ? Math.round(dollars * 100) : draft.budgetCents;
-  const merchant = text(raw.merchant, 160);
+  const merchant = text(raw.merchant, 160) ?? draft.merchant;
+  // Never lose what the participant already told us: if the model drops the item, fall back to their first sentence.
+  const remembered = text(raw.item, 240) ?? draft.item ?? suggestWithRules(userText[0] ?? "", merchants).item;
   const next: Draft = withCategory({
-    item: text(raw.item, 240) ?? draft.item,
+    item: remembered,
     category: text(raw.category, 80) ?? draft.category,
     merchant,
     budgetCents,
@@ -196,7 +200,8 @@ async function converseWithModel(messages: { role: "user" | "assistant"; content
   // The server, not the model, decides when the draft is complete.
   const need = nextNeed(next, userText.length > 1);
   const reply = text(raw.reply, 300);
-  return { reply: need === null ? (raw.done === true && reply ? reply : questionFor(null, next)) : (reply && raw.done !== true ? reply : questionFor(need, next)), draft: next, done: need === null, source: "ai" };
+  const spoken = need === null ? questionFor(null, next) : need === "item" && reply ? reply : questionFor(need, next);
+  return { reply: spoken, draft: next, done: need === null, source: "ai" };
 }
 
 router.post("/campus-cart/requests/converse", async (req, res): Promise<void> => {
