@@ -176,6 +176,10 @@ function RequestExperience() {
       if (!canSpeak) { setVoiceNote('This browser can’t speak out loud. Use the text below or try Safari or Chrome.'); finish(); return; }
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
+      const voices = window.speechSynthesis.getVoices().filter(v => v.lang.toLowerCase().startsWith('en'));
+      const preferred = [/premium|enhanced|natural|neural/i, /samantha|ava|allison|zoe|aria|jenny|google us english|google uk english female/i];
+      const best = preferred.map(pattern => voices.find(v => pattern.test(v.name))).find(Boolean) ?? voices.find(v => v.lang === 'en-US' && v.localService === false) ?? voices.find(v => v.lang === 'en-US');
+      if (best) utterance.voice = best;
       utterance.rate = 1.03;
       utterance.onend = finish;
       utterance.onerror = finish;
@@ -212,7 +216,7 @@ function RequestExperience() {
     readAloudRef.current = true;
     setReadAloud(true);
     setVoiceNote('');
-    speak(chatRef.current.length ? 'I’m listening.' : 'Hi! What would you like me to get?', true, true);
+    speak(chatRef.current.length ? 'I’m listening.' : 'Hi! What would you like me to get?', true);
   };
   const stopVoiceMode = () => {
     readAloudRef.current = false;

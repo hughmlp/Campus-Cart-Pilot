@@ -222,14 +222,40 @@ router.post("/campus-cart/requests/speech", async (req, res): Promise<void> => {
   if (!text) { res.status(400).json({ error: "Nothing to say" }); return; }
   try {
     const client = new OpenAI(settings);
-    const audio = await client.audio.speech.create({
-      model: process.env.AI_TTS_MODEL || "gpt-4o-mini-tts",
-      voice: (process.env.AI_TTS_VOICE || "alloy") as "alloy",
-      input: text,
-      instructions: "Warm, brisk and friendly, like a helpful campus assistant. Keep a natural pace.",
-      response_format: "mp3",
-    });
-    res.type("audio/mpeg").send(Buffer.from(await audio.arrayBuffer()));
+    const voice = (process.env.AI_TTS_VOICE || "alloy") as "alloy";
+    const speechModel = (model: string, extra: Record<string, unknown> = {}) => async () => {
+      const audio = await client.audio.speech.create({ model, voice, input: text, response_format: "mp3", ...extra });
+      return Buffer.from(await audio.arrayBuffer());
+    };
+    // Some model gateways only offer certain voice models, so try them in order and use the first that works.
+    const audioChat = (model: string) => async () => {
+      const completion = await client.chat.completions.create({
+        model,
+        modalities: ["text", "audio"],
+        audio: { voice, format: "mp3" },
+        messages: [
+          { role: "system", content: "Read the user's message aloud exactly as written, in a warm, brisk, friendly voice. Say nothing else." },
+          { role: "user", content: text },
+        ],
+      } as never) as unknown as { choices: { message: { audio?: { data?: string } } }[] };
+      const data = completion.choices[0]?.message?.audio?.data;
+      if (!data) throw new Error("No audio returned");
+      return Buffer.from(data, "base64");
+    };
+    const attempts: [string, () => Promise<Buffer>][] = [
+      [process.env.AI_TTS_MODEL || "gpt-4o-mini-tts", speechModel(process.env.AI_TTS_MODEL || "gpt-4o-mini-tts", { instructions: "Warm, brisk and friendly, like a helpful campus assistant. Keep a natural pace." })],
+      ["tts-1-hd", speechModel("tts-1-hd")],
+      ["tts-1", speechModel("tts-1")],
+      ["gpt-audio-mini", audioChat("gpt-audio-mini")],
+      ["gpt-audio", audioChat("gpt-audio")],
+    ];
+    let mp3: Buffer | null = null;
+    for (const [name, attempt] of attempts) {
+      try { mp3 = await attempt(); res.setHeader("X-Voice-Model", name); break; }
+      catch (error) { req.log.warn({ err: error, model: name }, "Voice model failed; trying the next one"); }
+    }
+    if (!mp3) throw new Error("No voice model available");
+    res.type("audio/mpeg").send(mp3);
   } catch (error) {
     req.log.error({ err: error }, "Speech synthesis failed");
     res.status(502).json({ error: "Could not create spoken reply" });
